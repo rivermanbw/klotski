@@ -15,7 +15,7 @@ Set TypingSpeed 50ms
 Set Theme "Catppuccin Mocha"
 Set WindowBar Colorful
 
-# Launch the game (binary must be pre-built with: go build -o puzzle .)
+# Launch the game 
 Type "./puzzle"
 Enter
 Sleep 3s
