@@ -16,34 +16,39 @@ type generatedPuzzle struct {
 	key     string
 }
 
-// TestGeneratePresets generates 300+ unique puzzles sorted by increasing
+// TestGeneratePresets generates 600+ unique puzzles sorted by increasing
 // optimal-move count and writes them to presets.go.
 //
 // Run with:
 //
-//	GENERATE_PRESETS=1 go test -run TestGeneratePresets -timeout 10m -count=1
+//	GENERATE_PRESETS=1 go test -run TestGeneratePresets -timeout 30m -count=1
 func TestGeneratePresets(t *testing.T) {
 	if os.Getenv("GENERATE_PRESETS") == "" {
 		t.Skip("Set GENERATE_PRESETS=1 to generate presets.go")
 	}
 
 	const (
-		perDifficulty = 250 // boards to generate per difficulty level
-		target        = 320 // desired number of presets
-		maxWorkers    = 8
+		maxWorkers = 8
+		// Phase 1: mixed difficulties for the first 320 presets.
+		mixedPerDiff = 250
+		mixedTarget  = 320
+		// Phase 2: hard-only for 300 additional presets.
+		hardCount  = 1000
+		hardTarget = 300
 	)
 
 	var mu sync.Mutex
 	seen := map[string]bool{}
-	var all []generatedPuzzle
 
-	sem := make(chan struct{}, maxWorkers)
-	var wg sync.WaitGroup
-
-	for _, diff := range []Difficulty{Easy, Medium, Hard} {
-		for i := 0; i < perDifficulty; i++ {
+	// generate launches n goroutines producing boards of difficulty d,
+	// deduplicating by canonical state.
+	generate := func(d Difficulty, n int) []generatedPuzzle {
+		var results []generatedPuzzle
+		sem := make(chan struct{}, maxWorkers)
+		var wg sync.WaitGroup
+		for i := 0; i < n; i++ {
 			wg.Add(1)
-			go func(d Difficulty) {
+			go func() {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
@@ -55,20 +60,65 @@ func TestGeneratePresets(t *testing.T) {
 				defer mu.Unlock()
 				if !seen[key] {
 					seen[key] = true
-					all = append(all, generatedPuzzle{
+					results = append(results, generatedPuzzle{
 						pieces:  append([]Piece{}, b.Pieces...),
 						optimal: opt,
 						key:     key,
 					})
 				}
-			}(diff)
+			}()
+		}
+		wg.Wait()
+		return results
+	}
+
+	// Phase 1: mixed difficulties.
+	var mixed []generatedPuzzle
+	for _, diff := range []Difficulty{Easy, Medium, Hard} {
+		got := generate(diff, mixedPerDiff)
+		t.Logf("Phase 1 — %s: %d unique puzzles", diff, len(got))
+		mixed = append(mixed, got...)
+	}
+
+	sort.Slice(mixed, func(i, j int) bool {
+		if mixed[i].optimal != mixed[j].optimal {
+			return mixed[i].optimal < mixed[j].optimal
+		}
+		return mixed[i].key < mixed[j].key
+	})
+	phase1 := selectEvenly(mixed, mixedTarget)
+	t.Logf("Phase 1: selected %d presets (optimal %d — %d)",
+		len(phase1), phase1[0].optimal, phase1[len(phase1)-1].optimal)
+
+	// Phase 2: hard-only puzzles not already selected.
+	phase1Keys := map[string]bool{}
+	for _, p := range phase1 {
+		phase1Keys[p.key] = true
+	}
+
+	hardPuzzles := generate(Hard, hardCount)
+	t.Logf("Phase 2 — Hard: %d unique puzzles generated", len(hardPuzzles))
+
+	// Filter out any that were already selected in phase 1.
+	var hardOnly []generatedPuzzle
+	for _, p := range hardPuzzles {
+		if !phase1Keys[p.key] {
+			hardOnly = append(hardOnly, p)
 		}
 	}
 
-	wg.Wait()
-	t.Logf("Generated %d unique puzzles", len(all))
+	sort.Slice(hardOnly, func(i, j int) bool {
+		if hardOnly[i].optimal != hardOnly[j].optimal {
+			return hardOnly[i].optimal < hardOnly[j].optimal
+		}
+		return hardOnly[i].key < hardOnly[j].key
+	})
+	phase2 := selectEvenly(hardOnly, hardTarget)
+	t.Logf("Phase 2: selected %d hard presets (optimal %d — %d)",
+		len(phase2), phase2[0].optimal, phase2[len(phase2)-1].optimal)
 
-	// Sort by optimal move count, break ties by canonical key.
+	// Combine and sort by optimal.
+	all := append(phase1, phase2...)
 	sort.Slice(all, func(i, j int) bool {
 		if all[i].optimal != all[j].optimal {
 			return all[i].optimal < all[j].optimal
@@ -76,12 +126,10 @@ func TestGeneratePresets(t *testing.T) {
 		return all[i].key < all[j].key
 	})
 
-	// Select evenly-spaced puzzles from the sorted list.
-	selected := selectEvenly(all, target)
-	t.Logf("Selected %d presets (optimal range: %d — %d)",
-		len(selected), selected[0].optimal, selected[len(selected)-1].optimal)
+	t.Logf("Total: %d presets (optimal %d — %d)",
+		len(all), all[0].optimal, all[len(all)-1].optimal)
 
-	writePresetsFile(t, selected)
+	writePresetsFile(t, all)
 }
 
 // selectEvenly picks `target` items evenly spaced from a sorted slice.
