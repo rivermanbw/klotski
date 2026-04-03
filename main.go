@@ -59,6 +59,32 @@ func diffColor(d Difficulty) lipgloss.Color {
 	return colorEasy
 }
 
+// scoreColor returns a color for a league score (1-10).
+// Gradient from red (1) through orange/yellow to bright green (10).
+var scoreColors = [11]lipgloss.Color{
+	"",    // 0 — unused
+	"196", // 1  — red
+	"202", // 2  — orange-red
+	"208", // 3  — dark orange
+	"214", // 4  — orange
+	"220", // 5  — gold
+	"226", // 6  — yellow
+	"190", // 7  — yellow-green
+	"154", // 8  — light green
+	"118", // 9  — green
+	"82",  // 10 — bright green
+}
+
+func scoreColor(score int) lipgloss.Color {
+	if score < 1 {
+		score = 1
+	}
+	if score > 10 {
+		score = 10
+	}
+	return scoreColors[score]
+}
+
 // boardReadyMsg is sent when board generation (done in background) completes.
 type boardReadyMsg struct {
 	board   *Board
@@ -838,7 +864,7 @@ func (m model) viewLeague() string {
 			lockStyle := lipgloss.NewStyle().Foreground(colorLocked)
 			line = lockStyle.Render(fmt.Sprintf("  %s  locked  %s", numStr, optStr))
 		} else if scored {
-			scoreStyle := lipgloss.NewStyle().Foreground(colorScored)
+			scoreStyle := lipgloss.NewStyle().Foreground(scoreColor(score))
 			dimOptStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 			line = fmt.Sprintf("  %s  %s  %s",
 				lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Render(numStr),
@@ -924,8 +950,8 @@ func (m model) viewLeaguePlay() string {
 	// Show current best score for this puzzle.
 	pd := m.saveData.player(m.nickname)
 	if prevScore, ok := pd.Scores[m.leagueIdx]; ok {
-		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(
-			fmt.Sprintf("  Current best: %d/10", prevScore)))
+		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  Current best: "))
+		sb.WriteString(lipgloss.NewStyle().Foreground(scoreColor(prevScore)).Bold(true).Render(fmt.Sprintf("%d/10", prevScore)))
 		sb.WriteString("\n")
 	}
 
@@ -938,11 +964,11 @@ func (m model) viewLeaguePlay() string {
 		}
 		sb.WriteString("\n")
 		// Score line.
-		scoreStr := fmt.Sprintf("  Score: %d/10", m.leagueScore)
+		sb.WriteString("  Score: ")
+		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(scoreColor(m.leagueScore)).Render(fmt.Sprintf("%d/10", m.leagueScore)))
 		if m.leagueNewBest {
-			scoreStr += "  NEW BEST!"
+			sb.WriteString(winStyle.Render("  NEW BEST!"))
 		}
-		sb.WriteString(winStyle.Render(scoreStr))
 		sb.WriteString("\n")
 		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  Enter: next puzzle  u: undo  U: restart  Esc: back to league  q: quit"))
 		sb.WriteString("\n")
