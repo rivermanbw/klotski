@@ -12,6 +12,8 @@
 - Leaderboard (`Tab` in league browser) — all players ranked by total score
 - League play uses same controls as free play but restricts mode-switching keys; Esc returns to browser
 - On win, score auto-saved if it's a new best; "NEW BEST!" indicator shown
+- After winning, `Enter` advances to the next puzzle; `Esc` returns to the browser
+- Cheat mode disabled in league play — no hints allowed
 
 ### Board Editor
 - New editor mode (`e` key) for creating custom puzzles from scratch

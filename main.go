@@ -567,13 +567,9 @@ func (m model) updateLeague(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursorY = 0
 			m.leagueScore = 0
 			m.leagueNewBest = false
+			m.cheatMode = false
 			m.hint = nil
 			m.hintLoading = false
-			if m.cheatMode {
-				m.hintSeq++
-				m.hintLoading = true
-				return m, computeHintCmd(m.board.Clone(), m.hintSeq)
-			}
 		}
 	}
 	return m, nil
@@ -583,18 +579,39 @@ func (m model) updateLeague(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) updateLeaguePlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
-	// Toggle cheat mode.
-	if key == "?" {
-		m.cheatMode = !m.cheatMode
-		if m.cheatMode && !m.won {
-			m.hintSeq++
-			m.hint = nil
-			m.hintLoading = true
-			return m, computeHintCmd(m.board.Clone(), m.hintSeq)
+	// Post-win keys — handled before updatePlay's early return.
+	if m.won {
+		switch key {
+		case "esc":
+			m = m.enterLeagueBrowser()
+			return m, nil
+		case "enter", " ":
+			// Advance to next puzzle if available and unlocked.
+			pd := m.saveData.player(m.nickname)
+			next := m.leagueIdx + 1
+			if next < len(presets) && next <= pd.highestUnlocked() {
+				m.leagueIdx = next
+				preset := presets[next]
+				m.board = &Board{
+					Pieces: append([]Piece{}, preset.Pieces...),
+				}
+				m.optimal = preset.Optimal
+				m.won = false
+				m.selected = -1
+				m.history = nil
+				m.cursorX = 0
+				m.cursorY = 0
+				m.leagueScore = 0
+				m.leagueNewBest = false
+				m.cheatMode = false
+				m.hint = nil
+				m.hintLoading = false
+				return m, nil
+			}
+			// No more puzzles or next is locked — go back to browser.
+			m = m.enterLeagueBrowser()
+			return m, nil
 		}
-		m.hint = nil
-		m.hintLoading = false
-		return m, nil
 	}
 
 	// Toggle coordinate labels.
@@ -890,16 +907,6 @@ func (m model) viewLeaguePlay() string {
 		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(optStr))
 	}
 
-	if m.cheatMode {
-		sb.WriteString("  ")
-		cheatBadge := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("0")).
-			Background(colorHintFg).
-			Padding(0, 1).
-			Render("CHEAT")
-		sb.WriteString(cheatBadge)
-	}
 	sb.WriteString("\n\n")
 
 	m.renderBoard(&sb)
@@ -922,18 +929,6 @@ func (m model) viewLeaguePlay() string {
 		sb.WriteString("\n")
 	}
 
-	// Hint display (cheat mode).
-	if m.cheatMode && !m.won {
-		hintStyle := lipgloss.NewStyle().Foreground(colorHintFg).Bold(true)
-		if m.hintLoading {
-			sb.WriteString(hintStyle.Render("  Computing hint..."))
-			sb.WriteString("\n")
-		} else if m.hint != nil {
-			sb.WriteString(hintStyle.Render(fmt.Sprintf("  Hint: %s", dirArrow(m.hint.Dir))))
-			sb.WriteString("\n")
-		}
-	}
-
 	if m.won {
 		winStyle := lipgloss.NewStyle().Bold(true).Foreground(colorWin)
 		sb.WriteString("\n")
@@ -949,7 +944,7 @@ func (m model) viewLeaguePlay() string {
 		}
 		sb.WriteString(winStyle.Render(scoreStr))
 		sb.WriteString("\n")
-		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  u: undo  U: restart (retry for better score)  Esc: back to league  q: quit"))
+		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  Enter: next puzzle  u: undo  U: restart  Esc: back to league  q: quit"))
 		sb.WriteString("\n")
 	} else {
 		sb.WriteString("\n")
@@ -958,7 +953,7 @@ func (m model) viewLeaguePlay() string {
 			sb.WriteString(selStyle.Render("  Piece selected — arrow keys to move, esc to deselect"))
 		} else {
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(
-				"  Arrows/hjkl: move  Enter/Space: select  c: coords  ?: cheat  Esc: back to league  q: quit"))
+				"  Arrows/hjkl: move  Enter/Space: select  c: coords  Esc: back to league  q: quit"))
 		}
 		sb.WriteString("\n")
 	}
@@ -1179,8 +1174,15 @@ func (m model) renderCell(x, y, idx, line int, ghost *Piece, ghostGrid [BoardW][
 	}
 
 	if idx == -1 {
-		label = "     "
-		fg = colorEmpty
+		// Show a dim "L" on target cells (where the Large piece must go to win).
+		isTarget := x >= 1 && x <= 2 && y >= 3 && y <= 4
+		if isTarget && line == 0 && !m.won {
+			label = "  L  "
+			fg = colorLocked
+		} else {
+			label = "     "
+			fg = colorEmpty
+		}
 	} else {
 		p := m.board.Pieces[idx]
 		switch p.Kind {
