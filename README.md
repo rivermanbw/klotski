@@ -11,6 +11,20 @@ on the board at any time, so space is tight and every move counts.
 
 Empty target cells display a dim `L` to indicate where the large block must go.
 
+## Demo
+
+![Game Mechanics Demo](demo.gif)
+
+The demo shows cursor navigation, piece selection and movement, undo, cheat mode
+(optimal next move hint), difficulty switching, and coordinate labels.
+
+To regenerate the GIF with [VHS](https://github.com/charmbracelet/vhs):
+
+```bash
+go build -o puzzle .
+vhs demo.tape
+```
+
 ## Pieces
 
 | Piece Type | Size       | Count | Symbol |
@@ -45,8 +59,8 @@ increasing difficulty (1-179 optimal moves). Press `g` from free play to enter.
 
 - **Scoring:** 10 points for an optimal solution, scaling proportionally down
   to a minimum of 1 point for any solve.
-- **Progression:** Completing puzzle N unlocks puzzle N+1. Replay any scored
-  puzzle to improve your score.
+- **All unlocked:** Every puzzle is accessible from the start. Replay any
+  scored puzzle to improve your score.
 - **Nickname:** Enter a nickname on first entry. Press `@` to switch players.
 - **Leaderboard:** Press `Tab` in the league browser to see all players ranked
   by total score.
@@ -91,6 +105,8 @@ Create custom puzzles from scratch. Press `e` from free play to enter.
 | Key            | Action                           |
 |----------------|----------------------------------|
 | Arrows / jk    | Browse puzzles                   |
+| Ctrl+u / Ctrl+d | Page up / page down (15 items) |
+| `g` / `G`      | Jump to first / last puzzle      |
 | Enter / Space  | Play selected puzzle             |
 | Tab            | Show leaderboard                 |
 | `@`            | Switch player                    |
@@ -109,7 +125,8 @@ Create custom puzzles from scratch. Press `e` from free play to enter.
 | `c`            | Toggle coordinate labels         |
 | `q` / Ctrl+C   | Quit                            |
 
-After winning: `Enter` advances to the next puzzle, `Esc` returns to the browser.
+After winning: `Enter` advances to the next puzzle, `Esc` returns to the browser,
+`u`/`U` to undo/restart and retry for a better score.
 
 ### Board Editor
 

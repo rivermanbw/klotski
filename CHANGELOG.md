@@ -3,16 +3,19 @@
 ## Unreleased
 
 ### League Mode
-- New league mode (`g` key from free play) with 320 pre-generated puzzles sorted by increasing difficulty (1-173 optimal moves)
-- Puzzle browser with scroll, showing puzzle number, optimal move count, score, and lock status
-- Linear progression — completing puzzle N unlocks puzzle N+1; replay any scored puzzle to improve
+- New league mode (`g` key from free play) with 620 pre-generated puzzles sorted by increasing difficulty (1-179 optimal moves)
+- All puzzles unlocked from the start — no linear progression or locking
+- Puzzle browser with scroll, showing puzzle number, optimal move count, and score
+- Cursor starts at the first unscored puzzle when entering the browser
 - Scoring: 10 points for optimal solution, scaling proportionally down to minimum 1 point for any solve
+- Score colors: 10-shade gradient from red (1) through orange/yellow to bright green (10)
+- Browser navigation: Arrows/jk for single step, `Ctrl+u`/`Ctrl+d` for page jump (15 items), `g`/`G` for home/end
 - Nickname entry for player identity, with `@` to switch players
 - Persistent save data at `~/.klotski-puzzle/save.json` — tracks scores per player, remembers last player
 - Leaderboard (`Tab` in league browser) — all players ranked by total score
 - League play uses same controls as free play but restricts mode-switching keys; Esc returns to browser
 - On win, score auto-saved if it's a new best; "NEW BEST!" indicator shown
-- After winning, `Enter` advances to the next puzzle; `Esc` returns to the browser
+- After winning, `Enter` advances to the next puzzle; `Esc` returns to the browser; `u`/`U` to undo/restart for a better score
 - Cheat mode disabled in league play — no hints allowed
 
 ### Board Editor
@@ -28,6 +31,10 @@
 - Custom boards play with a "Custom" badge and computed optimal move count
 - `n` exits custom mode and returns to random puzzle generation
 - `Esc` cancels the editor and generates a new random board
+
+### Visual
+- Target cell indicator: empty cells in the 2x2 goal area (cols 1-2, rows 3-4) show a dim "L"
+- Score colors: 10-shade red-to-green gradient matching score value
 
 ### Cheat Mode
 - Toggle with `?` to show the optimal next move
