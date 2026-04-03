@@ -4,38 +4,34 @@
 
 Output demo.gif
 
+Require ./puzzle
+
 Set Shell "bash"
-Set FontSize 16
-Set Width 80
-Set Height 28
-Set Padding 10
+Set FontSize 22
+Set Width 1200
+Set Height 600
+Set Padding 20
 Set TypingSpeed 50ms
 Set Theme "Catppuccin Mocha"
+Set WindowBar Colorful
 
-# Build the binary (hidden from recording)
-Hide
-Type "go build -o puzzle . && clear"
-Enter
-Sleep 10s
-Show
-
-# Launch the game
+# Launch the game (binary must be pre-built with: go build -o puzzle .)
 Type "./puzzle"
 Enter
-Sleep 2s
+Sleep 3s
 
 # --- Navigate the board ---
 # Cursor starts at (0,0). Move around to show the board.
 Down
-Sleep 250ms
+Sleep 300ms
 Down
-Sleep 250ms
+Sleep 300ms
 Right
-Sleep 250ms
+Sleep 300ms
 Right
-Sleep 250ms
+Sleep 300ms
 Down
-Sleep 250ms
+Sleep 300ms
 
 # --- Select and move a piece ---
 # Select whatever piece is under the cursor
@@ -54,11 +50,11 @@ Sleep 600ms
 
 # --- Move another piece ---
 Up
-Sleep 250ms
+Sleep 300ms
 Up
-Sleep 250ms
+Sleep 300ms
 Left
-Sleep 250ms
+Sleep 300ms
 
 # Select and move
 Enter
