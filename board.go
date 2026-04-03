@@ -132,8 +132,20 @@ func (b *Board) Move(i int, dir Direction) bool {
 	dx, dy := dirDelta(dir)
 	b.Pieces[i].X += dx
 	b.Pieces[i].Y += dy
-	b.Moves++
 	return true
+}
+
+// pieceDist returns the Manhattan distance between two pieces' positions.
+func pieceDist(a, b Piece) int {
+	dx := a.X - b.X
+	if dx < 0 {
+		dx = -dx
+	}
+	dy := a.Y - b.Y
+	if dy < 0 {
+		dy = -dy
+	}
+	return dx + dy
 }
 
 // IsWon returns true if the large 2x2 block is at the bottom-center (col 1, row 3).

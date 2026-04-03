@@ -82,19 +82,6 @@ func (p *PlayerData) completed() int {
 	return len(p.Scores)
 }
 
-// highestUnlocked returns the index of the highest puzzle the player may attempt.
-// Puzzle 0 is always unlocked. Completing puzzle N unlocks N+1.
-func (p *PlayerData) highestUnlocked() int {
-	idx := 0
-	for idx < len(presets)-1 {
-		if _, ok := p.Scores[idx]; !ok {
-			break
-		}
-		idx++
-	}
-	return idx
-}
-
 // leaderboardEntry is one row in the leaderboard view.
 type leaderboardEntry struct {
 	Name      string
