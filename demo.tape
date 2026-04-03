@@ -9,7 +9,7 @@ Require ./puzzle
 Set Shell "bash"
 Set FontSize 22
 Set Width 1200
-Set Height 600
+Set Height 800
 Set Padding 20
 Set TypingSpeed 50ms
 Set Theme "Catppuccin Mocha"
