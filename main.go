@@ -366,9 +366,7 @@ func (m model) renderCell(x, y, idx, line int) string {
 			if m.won {
 				fg = colorWin
 			}
-			if line == 1 && x == p.X && y == p.Y {
-				label = "  L  "
-			} else if line == 1 && x == p.X+1 && y == p.Y {
+			if line == 0 {
 				label = "  L  "
 			} else {
 				label = "     "
