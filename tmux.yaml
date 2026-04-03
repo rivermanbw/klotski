@@ -1,0 +1,11 @@
+session_name: puzzle
+start_directory: /home/riverman/projects/puzzle
+windows:
+  - window_name: editor
+    panes:
+      - shell_command:
+          - nvim
+  - window_name: opencode
+    panes:
+      - shell_command:
+          - opencode
