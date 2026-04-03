@@ -74,8 +74,8 @@ func Solve(b *Board) int {
 
 		// Build occupancy grid for this state.
 		var grid [BoardW][BoardH]int
-		for x := 0; x < BoardW; x++ {
-			for y := 0; y < BoardH; y++ {
+		for x := range BoardW {
+			for y := range BoardH {
 				grid[x][y] = -1
 			}
 		}
