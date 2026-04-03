@@ -52,6 +52,7 @@ type model struct {
 	difficulty Difficulty
 	optimal    int  // minimum moves to solve (from BFS at generation time)
 	loading    bool // true while generating a new board
+	showCoords bool // toggle coordinate labels on the board
 }
 
 func initialModel() model {
@@ -122,6 +123,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key == "n" {
 			m.loading = true
 			return m, generateBoardCmd(m.difficulty)
+		}
+
+		// Toggle coordinate labels.
+		if key == "c" {
+			m.showCoords = !m.showCoords
+			return m, nil
 		}
 
 		// Undo.
@@ -232,6 +239,19 @@ func (m model) View() string {
 
 	grid := m.board.occupancy()
 
+	// Column headers (when coordinate system is enabled).
+	if m.showCoords {
+		coordStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+		sb.WriteString("   ")
+		for x := range BoardW {
+			sb.WriteString(coordStyle.Render(fmt.Sprintf("  %d  ", x)))
+			if x < BoardW-1 {
+				sb.WriteString(" ")
+			}
+		}
+		sb.WriteString("\n")
+	}
+
 	// Top border.
 	sb.WriteString("  ┌")
 	for x := range BoardW {
@@ -245,7 +265,14 @@ func (m model) View() string {
 	for y := range BoardH {
 		// Two lines per cell for visual height.
 		for line := 0; line < 2; line++ {
-			sb.WriteString("  │")
+			// Row label on first line of each row.
+			if m.showCoords && line == 0 {
+				coordStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+				sb.WriteString(coordStyle.Render(fmt.Sprintf("%d", y)))
+				sb.WriteString(" │")
+			} else {
+				sb.WriteString("  │")
+			}
 			for x := range BoardW {
 				idx := grid[x][y]
 				cellStr := m.renderCell(x, y, idx, line)
@@ -317,7 +344,7 @@ func (m model) View() string {
 			sb.WriteString(selStyle.Render("  Piece selected — arrow keys to move, esc to deselect"))
 		} else {
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(
-				"  Arrows/hjkl: move  Enter/Space: select  n: new  1/2/3: difficulty  q: quit"))
+				"  Arrows/hjkl: move  Enter/Space: select  n: new  c: coords  1/2/3: difficulty  q: quit"))
 		}
 		sb.WriteString("\n")
 	}
