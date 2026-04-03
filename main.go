@@ -21,6 +21,8 @@ var (
 	colorEasy   = lipgloss.Color("82")  // green
 	colorMedDif = lipgloss.Color("214") // orange
 	colorHard   = lipgloss.Color("196") // red
+	colorHint   = lipgloss.Color("53")  // dark purple for hint background
+	colorHintFg = lipgloss.Color("213") // bright pink for hint arrow/text
 )
 
 func diffColor(d Difficulty) lipgloss.Color {
@@ -42,6 +44,12 @@ type boardReadyMsg struct {
 	diff    Difficulty
 }
 
+// hintReadyMsg is sent when the background hint computation completes.
+type hintReadyMsg struct {
+	hint *Hint
+	seq  int // sequence number to discard stale results
+}
+
 type model struct {
 	board      *Board
 	cursorX    int
@@ -53,6 +61,11 @@ type model struct {
 	optimal    int  // minimum moves to solve (from BFS at generation time)
 	loading    bool // true while generating a new board
 	showCoords bool // toggle coordinate labels on the board
+
+	cheatMode   bool  // whether cheat mode is active
+	hint        *Hint // current hint (nil if unavailable or not computed)
+	hintLoading bool  // true while computing a hint
+	hintSeq     int   // sequence counter to discard stale hint results
 }
 
 func initialModel() model {
@@ -72,6 +85,26 @@ func generateBoardCmd(diff Difficulty) tea.Cmd {
 	}
 }
 
+func computeHintCmd(b *Board, seq int) tea.Cmd {
+	return func() tea.Msg {
+		return hintReadyMsg{hint: SolveNextMove(b), seq: seq}
+	}
+}
+
+func dirArrow(dir Direction) string {
+	switch dir {
+	case Up:
+		return "↑"
+	case Down:
+		return "↓"
+	case Left:
+		return "←"
+	case Right:
+		return "→"
+	}
+	return "?"
+}
+
 func (m model) Init() tea.Cmd {
 	return generateBoardCmd(m.difficulty)
 }
@@ -88,6 +121,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.history = nil
 		m.cursorX = 0
 		m.cursorY = 0
+		m.hint = nil
+		m.hintLoading = false
+		if m.cheatMode {
+			m.hintSeq++
+			m.hintLoading = true
+			return m, computeHintCmd(m.board.Clone(), m.hintSeq)
+		}
+		return m, nil
+
+	case hintReadyMsg:
+		if msg.seq == m.hintSeq && m.cheatMode {
+			m.hint = msg.hint
+			m.hintLoading = false
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -131,11 +178,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Toggle cheat mode.
+		if key == "?" {
+			m.cheatMode = !m.cheatMode
+			if m.cheatMode && !m.won {
+				m.hintSeq++
+				m.hint = nil
+				m.hintLoading = true
+				return m, computeHintCmd(m.board.Clone(), m.hintSeq)
+			}
+			m.hint = nil
+			m.hintLoading = false
+			return m, nil
+		}
+
 		// Undo.
 		if key == "u" && len(m.history) > 0 && !m.won {
 			m.board = m.history[len(m.history)-1]
 			m.history = m.history[:len(m.history)-1]
 			m.selected = -1
+			if m.cheatMode {
+				m.hintSeq++
+				m.hint = nil
+				m.hintLoading = true
+				return m, computeHintCmd(m.board.Clone(), m.hintSeq)
+			}
 			return m, nil
 		}
 
@@ -187,6 +254,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.board.IsWon() {
 						m.won = true
 						m.selected = -1
+						m.hint = nil
+						m.hintLoading = false
+					} else if m.cheatMode {
+						m.hintSeq++
+						m.hint = nil
+						m.hintLoading = true
+						return m, computeHintCmd(m.board.Clone(), m.hintSeq)
 					}
 				}
 			} else {
@@ -225,6 +299,17 @@ func (m model) View() string {
 	if m.optimal > 0 {
 		optStr := fmt.Sprintf("  Best: %d moves", m.optimal)
 		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(optStr))
+	}
+
+	if m.cheatMode {
+		sb.WriteString("  ")
+		cheatBadge := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("0")).
+			Background(colorHintFg).
+			Padding(0, 1).
+			Render("CHEAT")
+		sb.WriteString(cheatBadge)
 	}
 	sb.WriteString("\n\n")
 
@@ -327,6 +412,18 @@ func (m model) View() string {
 	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(movesStr))
 	sb.WriteString("\n")
 
+	// Hint display (cheat mode).
+	if m.cheatMode && !m.won {
+		hintStyle := lipgloss.NewStyle().Foreground(colorHintFg).Bold(true)
+		if m.hintLoading {
+			sb.WriteString(hintStyle.Render("  Computing hint..."))
+			sb.WriteString("\n")
+		} else if m.hint != nil {
+			sb.WriteString(hintStyle.Render(fmt.Sprintf("  Hint: %s", dirArrow(m.hint.Dir))))
+			sb.WriteString("\n")
+		}
+	}
+
 	if m.won {
 		winStyle := lipgloss.NewStyle().Bold(true).Foreground(colorWin)
 		sb.WriteString("\n")
@@ -344,7 +441,7 @@ func (m model) View() string {
 			sb.WriteString(selStyle.Render("  Piece selected — arrow keys to move, esc to deselect"))
 		} else {
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(
-				"  Arrows/hjkl: move  Enter/Space: select  n: new  c: coords  1/2/3: difficulty  q: quit"))
+				"  Arrows/hjkl: move  Enter/Space: select  n: new  c: coords  ?: cheat  1/2/3: difficulty  q: quit"))
 		}
 		sb.WriteString("\n")
 	}
@@ -355,6 +452,7 @@ func (m model) View() string {
 func (m model) renderCell(x, y, idx, line int) string {
 	isCursor := (x == m.cursorX && y == m.cursorY)
 	isSelected := (idx != -1 && idx == m.selected)
+	isHinted := m.cheatMode && m.hint != nil && idx != -1 && idx == m.hint.PieceIndex && !m.won
 
 	var label string
 	var fg lipgloss.Color
@@ -403,8 +501,22 @@ func (m model) renderCell(x, y, idx, line int) string {
 
 	style := lipgloss.NewStyle().Foreground(fg)
 
+	if isHinted && !isSelected {
+		style = style.Background(colorHint)
+	}
 	if isSelected {
 		style = style.Background(lipgloss.Color("22"))
+	}
+
+	// Show direction arrow on line 1 of the hinted piece's origin cell.
+	if isHinted && line == 1 && x == m.board.Pieces[idx].X && y == m.board.Pieces[idx].Y {
+		arrowStyle := lipgloss.NewStyle().Foreground(colorHintFg).Bold(true)
+		if isSelected {
+			arrowStyle = arrowStyle.Background(lipgloss.Color("22"))
+		} else {
+			arrowStyle = arrowStyle.Background(colorHint)
+		}
+		return arrowStyle.Render(fmt.Sprintf("  %s  ", dirArrow(m.hint.Dir)))
 	}
 
 	if isCursor && !m.won {
@@ -412,6 +524,8 @@ func (m model) renderCell(x, y, idx, line int) string {
 			cursorStyle := lipgloss.NewStyle().Foreground(colorCursor).Bold(true)
 			if isSelected {
 				cursorStyle = cursorStyle.Background(lipgloss.Color("22"))
+			} else if isHinted {
+				cursorStyle = cursorStyle.Background(colorHint)
 			}
 			return cursorStyle.Render(" [*] ")
 		}

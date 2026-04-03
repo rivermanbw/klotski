@@ -9,3 +9,7 @@ windows:
     panes:
       - shell_command:
           - opencode
+  - window_name: puzzle 
+    panes:
+      - shell_command:
+          - ./puzzle
