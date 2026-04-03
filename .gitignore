@@ -1,5 +1,6 @@
 # Build output
 puzzle
+bin/
 
 # Editor/IDE
 .idea/

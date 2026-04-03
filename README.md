@@ -11,6 +11,20 @@ on the board at any time, so space is tight and every move counts.
 
 Empty target cells display a dim `L` to indicate where the large block must go.
 
+## Demo
+
+![Game Mechanics Demo](demo.gif)
+
+The demo shows cursor navigation, piece selection and movement, undo, cheat mode
+(optimal next move hint), difficulty switching, and coordinate labels.
+
+To regenerate the GIF with [VHS](https://github.com/charmbracelet/vhs):
+
+```bash
+go build -o puzzle .
+vhs demo.tape
+```
+
 ## Pieces
 
 | Piece Type | Size       | Count | Symbol |
