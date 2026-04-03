@@ -9,6 +9,18 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// gameMode tracks which UI mode is active.
+type gameMode int
+
+const (
+	modeFreePlay    gameMode = iota // normal puzzle play
+	modeEditor                      // board editor
+	modeNameInput                   // nickname entry before league
+	modeLeague                      // league puzzle browser
+	modeLeaguePlay                  // playing a league puzzle
+	modeLeaderboard                 // leaderboard view
+)
+
 // Colors for piece types.
 var (
 	colorSmall  = lipgloss.Color("214") // orange
@@ -27,6 +39,10 @@ var (
 	colorGhost  = lipgloss.Color("240") // dim gray for ghost preview
 	colorEditor = lipgloss.Color("177") // light purple for editor badge
 	colorError  = lipgloss.Color("196") // red for error messages
+	colorLeague = lipgloss.Color("220") // gold for league badge
+	colorLocked = lipgloss.Color("240") // dim for locked puzzles
+	colorScored = lipgloss.Color("82")  // green for scored puzzles
+	colorRank   = lipgloss.Color("220") // gold for rank numbers
 )
 
 func diffColor(d Difficulty) lipgloss.Color {
@@ -62,6 +78,8 @@ type editorSolveMsg struct {
 }
 
 type model struct {
+	mode gameMode
+
 	board      *Board
 	cursorX    int
 	cursorY    int
@@ -78,11 +96,19 @@ type model struct {
 	hintLoading bool  // true while computing a hint
 	hintSeq     int   // sequence counter to discard stale hint results
 
-	editing     bool      // true when in board editor mode
 	editPiece   PieceKind // currently selected piece type for placement
 	editError   string    // error message to display in editor
 	editSolving bool      // true while checking solvability
 	custom      bool      // true when playing a custom board
+
+	// League fields.
+	nickname      string    // current player name
+	nameInput     string    // text buffer for nickname entry
+	saveData      *SaveData // persistent save data (loaded on league entry)
+	leagueIdx     int       // selected puzzle index in league browser
+	leagueScroll  int       // scroll offset for league browser
+	leagueScore   int       // score for last completed league puzzle
+	leagueNewBest bool      // true when a new best score was achieved
 }
 
 func initialModel() model {
@@ -168,7 +194,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Transition to play mode with the custom board.
-		m.editing = false
+		m.mode = modeFreePlay
 		m.optimal = msg.optimal
 		m.difficulty = Custom
 		m.custom = true
@@ -196,184 +222,421 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Route to editor handler when in editor mode.
-		if m.editing {
+		// Route by mode.
+		switch m.mode {
+		case modeEditor:
 			return m.updateEditor(msg)
+		case modeNameInput:
+			return m.updateNameInput(msg)
+		case modeLeague:
+			return m.updateLeague(msg)
+		case modeLeaguePlay:
+			return m.updateLeaguePlay(msg)
+		case modeLeaderboard:
+			return m.updateLeaderboard(msg)
+		default:
+			return m.updateFreePlay(msg)
 		}
+	}
+	return m, nil
+}
 
-		// Ignore other keys while generating.
-		if m.loading {
-			return m, nil
-		}
+// enterLeague transitions to the league. If no last_player, goes to name input first.
+func (m model) enterLeague() (model, tea.Cmd) {
+	m.saveData = loadSave()
+	if m.saveData.LastPlayer != "" {
+		m.nickname = m.saveData.LastPlayer
+		return m.enterLeagueBrowser(), nil
+	}
+	m.mode = modeNameInput
+	m.nameInput = ""
+	return m, nil
+}
 
-		// Enter editor mode.
-		if key == "e" && !m.won {
-			m.editing = true
-			m.board = &Board{Pieces: []Piece{}}
-			m.cursorX = 0
-			m.cursorY = 0
-			m.selected = -1
-			m.editPiece = Large
-			m.editError = ""
-			m.editSolving = false
-			m.hint = nil
-			m.hintLoading = false
-			return m, nil
-		}
+// enterLeagueBrowser sets up the league puzzle browser.
+func (m model) enterLeagueBrowser() model {
+	m.mode = modeLeague
+	m.leagueScore = 0
+	m.leagueNewBest = false
+	pd := m.saveData.player(m.nickname)
+	// Position cursor at the highest unlocked puzzle.
+	m.leagueIdx = pd.highestUnlocked()
+	m.leagueScroll = 0
+	m.adjustLeagueScroll()
+	return m
+}
 
-		// Cycle difficulty: 1/2/3.
-		if key == "1" || key == "2" || key == "3" {
-			var d Difficulty
-			switch key {
-			case "1":
-				d = Easy
-			case "2":
-				d = Medium
-			case "3":
-				d = Hard
-			}
-			m.difficulty = d
-			m.loading = true
-			m.custom = false
-			return m, generateBoardCmd(d)
-		}
+const leagueVisible = 15 // number of puzzles visible at once in the browser
 
-		// New game (same difficulty) — if custom, exit custom mode.
-		if key == "n" {
-			if m.custom {
-				m.difficulty = Easy
-				m.custom = false
-			}
-			m.loading = true
-			return m, generateBoardCmd(m.difficulty)
-		}
+// adjustLeagueScroll ensures the selected item is visible.
+func (m *model) adjustLeagueScroll() {
+	if m.leagueIdx < m.leagueScroll {
+		m.leagueScroll = m.leagueIdx
+	}
+	if m.leagueIdx >= m.leagueScroll+leagueVisible {
+		m.leagueScroll = m.leagueIdx - leagueVisible + 1
+	}
+}
 
-		// Toggle coordinate labels.
-		if key == "c" {
-			m.showCoords = !m.showCoords
-			return m, nil
-		}
+// updateFreePlay handles keys in the normal free-play mode.
+func (m model) updateFreePlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
 
-		// Toggle cheat mode.
-		if key == "?" {
-			m.cheatMode = !m.cheatMode
-			if m.cheatMode && !m.won {
-				m.hintSeq++
-				m.hint = nil
-				m.hintLoading = true
-				return m, computeHintCmd(m.board.Clone(), m.hintSeq)
-			}
-			m.hint = nil
-			m.hintLoading = false
-			return m, nil
-		}
+	// Ignore keys while generating.
+	if m.loading {
+		return m, nil
+	}
 
-		// Undo.
-		if key == "u" && len(m.history) > 0 {
-			m.board = m.history[len(m.history)-1]
-			m.history = m.history[:len(m.history)-1]
-			m.selected = -1
-			m.won = false
-			if m.cheatMode {
-				m.hintSeq++
-				m.hint = nil
-				m.hintLoading = true
-				return m, computeHintCmd(m.board.Clone(), m.hintSeq)
-			}
-			return m, nil
-		}
+	// Enter league mode.
+	if key == "g" {
+		m2, cmd := m.enterLeague()
+		return m2, cmd
+	}
 
-		// Reset to starting state.
-		if key == "U" && len(m.history) > 0 {
-			m.board = m.history[0]
-			m.history = nil
-			m.selected = -1
-			m.won = false
-			m.hint = nil
-			m.hintLoading = false
-			if m.cheatMode {
-				m.hintSeq++
-				m.hintLoading = true
-				return m, computeHintCmd(m.board.Clone(), m.hintSeq)
-			}
-			return m, nil
-		}
+	// Enter editor mode.
+	if key == "e" && !m.won {
+		m.mode = modeEditor
+		m.board = &Board{Pieces: []Piece{}}
+		m.cursorX = 0
+		m.cursorY = 0
+		m.selected = -1
+		m.editPiece = Large
+		m.editError = ""
+		m.editSolving = false
+		m.hint = nil
+		m.hintLoading = false
+		return m, nil
+	}
 
-		if m.won {
-			return m, nil
-		}
-
-		// Deselect.
-		if key == "esc" {
-			m.selected = -1
-			return m, nil
-		}
-
-		// Select / deselect piece.
-		if key == "enter" || key == " " {
-			if m.selected != -1 {
-				m.selected = -1
-			} else {
-				idx := m.board.PieceAt(m.cursorX, m.cursorY)
-				if idx != -1 {
-					m.selected = idx
-				}
-			}
-			return m, nil
-		}
-
-		// Directional input.
-		var dir Direction
-		var isDir bool
+	// Cycle difficulty: 1/2/3.
+	if key == "1" || key == "2" || key == "3" {
+		var d Difficulty
 		switch key {
-		case "up", "k":
-			dir, isDir = Up, true
-		case "down", "j":
-			dir, isDir = Down, true
-		case "left", "h":
-			dir, isDir = Left, true
-		case "right", "l":
-			dir, isDir = Right, true
+		case "1":
+			d = Easy
+		case "2":
+			d = Medium
+		case "3":
+			d = Hard
 		}
+		m.difficulty = d
+		m.loading = true
+		m.custom = false
+		return m, generateBoardCmd(d)
+	}
 
-		if isDir {
-			if m.selected != -1 {
-				snapshot := m.board.Clone()
-				if m.board.Move(m.selected, dir) {
-					m.history = append(m.history, snapshot)
-					p := m.board.Pieces[m.selected]
-					m.cursorX = p.X
-					m.cursorY = p.Y
-					if m.board.IsWon() {
-						m.won = true
-						m.selected = -1
-						m.hint = nil
-						m.hintLoading = false
-					} else if m.cheatMode {
-						m.hintSeq++
-						m.hint = nil
-						m.hintLoading = true
-						return m, computeHintCmd(m.board.Clone(), m.hintSeq)
+	// New game (same difficulty) — if custom, exit custom mode.
+	if key == "n" {
+		if m.custom {
+			m.difficulty = Easy
+			m.custom = false
+		}
+		m.loading = true
+		return m, generateBoardCmd(m.difficulty)
+	}
+
+	// Toggle coordinate labels.
+	if key == "c" {
+		m.showCoords = !m.showCoords
+		return m, nil
+	}
+
+	// Toggle cheat mode.
+	if key == "?" {
+		m.cheatMode = !m.cheatMode
+		if m.cheatMode && !m.won {
+			m.hintSeq++
+			m.hint = nil
+			m.hintLoading = true
+			return m, computeHintCmd(m.board.Clone(), m.hintSeq)
+		}
+		m.hint = nil
+		m.hintLoading = false
+		return m, nil
+	}
+
+	return m.updatePlay(msg)
+}
+
+// updatePlay handles shared play controls (cursor, select, move, undo) used
+// by both free play and league play.
+func (m model) updatePlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	// Undo.
+	if key == "u" && len(m.history) > 0 {
+		m.board = m.history[len(m.history)-1]
+		m.history = m.history[:len(m.history)-1]
+		m.selected = -1
+		m.won = false
+		if m.cheatMode {
+			m.hintSeq++
+			m.hint = nil
+			m.hintLoading = true
+			return m, computeHintCmd(m.board.Clone(), m.hintSeq)
+		}
+		return m, nil
+	}
+
+	// Reset to starting state.
+	if key == "U" && len(m.history) > 0 {
+		m.board = m.history[0]
+		m.history = nil
+		m.selected = -1
+		m.won = false
+		m.hint = nil
+		m.hintLoading = false
+		if m.cheatMode {
+			m.hintSeq++
+			m.hintLoading = true
+			return m, computeHintCmd(m.board.Clone(), m.hintSeq)
+		}
+		return m, nil
+	}
+
+	if m.won {
+		return m, nil
+	}
+
+	// Deselect.
+	if key == "esc" {
+		if m.selected != -1 {
+			m.selected = -1
+			return m, nil
+		}
+		// In league play, Esc with no selection returns to league browser.
+		if m.mode == modeLeaguePlay {
+			m = m.enterLeagueBrowser()
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// Select / deselect piece.
+	if key == "enter" || key == " " {
+		if m.selected != -1 {
+			m.selected = -1
+		} else {
+			idx := m.board.PieceAt(m.cursorX, m.cursorY)
+			if idx != -1 {
+				m.selected = idx
+			}
+		}
+		return m, nil
+	}
+
+	// Directional input.
+	var dir Direction
+	var isDir bool
+	switch key {
+	case "up", "k":
+		dir, isDir = Up, true
+	case "down", "j":
+		dir, isDir = Down, true
+	case "left", "h":
+		dir, isDir = Left, true
+	case "right", "l":
+		dir, isDir = Right, true
+	}
+
+	if isDir {
+		if m.selected != -1 {
+			snapshot := m.board.Clone()
+			if m.board.Move(m.selected, dir) {
+				m.history = append(m.history, snapshot)
+				p := m.board.Pieces[m.selected]
+				m.cursorX = p.X
+				m.cursorY = p.Y
+				if m.board.IsWon() {
+					m.won = true
+					m.selected = -1
+					m.hint = nil
+					m.hintLoading = false
+					// In league play, auto-save the score.
+					if m.mode == modeLeaguePlay {
+						m.leagueScore = calcScore(m.optimal, m.board.Moves)
+						m.leagueNewBest = false
+						pd := m.saveData.player(m.nickname)
+						prev, hasPrev := pd.Scores[m.leagueIdx]
+						if !hasPrev || m.leagueScore > prev {
+							pd.Scores[m.leagueIdx] = m.leagueScore
+							m.leagueNewBest = true
+							_ = m.saveData.save()
+						}
 					}
+				} else if m.cheatMode {
+					m.hintSeq++
+					m.hint = nil
+					m.hintLoading = true
+					return m, computeHintCmd(m.board.Clone(), m.hintSeq)
 				}
-			} else {
-				dx, dy := dirDelta(dir)
-				nx, ny := m.cursorX+dx, m.cursorY+dy
-				if nx >= 0 && nx < BoardW && ny >= 0 && ny < BoardH {
-					m.cursorX = nx
-					m.cursorY = ny
-				}
+			}
+		} else {
+			dx, dy := dirDelta(dir)
+			nx, ny := m.cursorX+dx, m.cursorY+dy
+			if nx >= 0 && nx < BoardW && ny >= 0 && ny < BoardH {
+				m.cursorX = nx
+				m.cursorY = ny
 			}
 		}
 	}
 	return m, nil
 }
 
-func (m model) View() string {
-	if m.editing {
-		return m.viewEditor()
+// updateNameInput handles nickname text entry.
+func (m model) updateNameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "esc":
+		// Cancel — return to free play.
+		m.mode = modeFreePlay
+		return m, nil
+	case "enter":
+		name := strings.TrimSpace(m.nameInput)
+		if name == "" {
+			return m, nil
+		}
+		m.nickname = name
+		m.saveData.LastPlayer = name
+		_ = m.saveData.save()
+		m = m.enterLeagueBrowser()
+		return m, nil
+	case "backspace":
+		if len(m.nameInput) > 0 {
+			m.nameInput = m.nameInput[:len(m.nameInput)-1]
+		}
+	default:
+		// Only accept printable characters, limit length.
+		if len(key) == 1 && len(m.nameInput) < 20 {
+			m.nameInput += key
+		}
+	}
+	return m, nil
+}
+
+// updateLeague handles keys in the league puzzle browser.
+func (m model) updateLeague(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	pd := m.saveData.player(m.nickname)
+	maxIdx := pd.highestUnlocked()
+
+	switch key {
+	case "esc":
+		// Return to free play.
+		m.mode = modeFreePlay
+		return m, nil
+	case "tab":
+		// Show leaderboard.
+		m.mode = modeLeaderboard
+		return m, nil
+	case "@":
+		// Switch player — go to name input.
+		m.mode = modeNameInput
+		m.nameInput = ""
+		return m, nil
+	case "up", "k":
+		if m.leagueIdx > 0 {
+			m.leagueIdx--
+			m.adjustLeagueScroll()
+		}
+	case "down", "j":
+		if m.leagueIdx < len(presets)-1 {
+			m.leagueIdx++
+			m.adjustLeagueScroll()
+		}
+	case "home", "g":
+		m.leagueIdx = 0
+		m.adjustLeagueScroll()
+	case "end", "G":
+		m.leagueIdx = len(presets) - 1
+		m.adjustLeagueScroll()
+	case "enter", " ":
+		// Start puzzle if unlocked.
+		if m.leagueIdx <= maxIdx {
+			preset := presets[m.leagueIdx]
+			m.mode = modeLeaguePlay
+			m.board = &Board{
+				Pieces: append([]Piece{}, preset.Pieces...),
+			}
+			m.optimal = preset.Optimal
+			m.won = false
+			m.selected = -1
+			m.history = nil
+			m.cursorX = 0
+			m.cursorY = 0
+			m.leagueScore = 0
+			m.leagueNewBest = false
+			m.hint = nil
+			m.hintLoading = false
+			if m.cheatMode {
+				m.hintSeq++
+				m.hintLoading = true
+				return m, computeHintCmd(m.board.Clone(), m.hintSeq)
+			}
+		}
+	}
+	return m, nil
+}
+
+// updateLeaguePlay handles keys during league puzzle play.
+func (m model) updateLeaguePlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	// Toggle cheat mode.
+	if key == "?" {
+		m.cheatMode = !m.cheatMode
+		if m.cheatMode && !m.won {
+			m.hintSeq++
+			m.hint = nil
+			m.hintLoading = true
+			return m, computeHintCmd(m.board.Clone(), m.hintSeq)
+		}
+		m.hint = nil
+		m.hintLoading = false
+		return m, nil
 	}
 
+	// Toggle coordinate labels.
+	if key == "c" {
+		m.showCoords = !m.showCoords
+		return m, nil
+	}
+
+	return m.updatePlay(msg)
+}
+
+// updateLeaderboard handles keys in the leaderboard view.
+func (m model) updateLeaderboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	switch key {
+	case "esc", "tab":
+		// Return to league browser.
+		m.mode = modeLeague
+	}
+	return m, nil
+}
+
+func (m model) View() string {
+	switch m.mode {
+	case modeEditor:
+		return m.viewEditor()
+	case modeNameInput:
+		return m.viewNameInput()
+	case modeLeague:
+		return m.viewLeague()
+	case modeLeaguePlay:
+		return m.viewLeaguePlay()
+	case modeLeaderboard:
+		return m.viewLeaderboard()
+	default:
+		return m.viewFreePlay()
+	}
+}
+
+// viewFreePlay renders the normal free-play screen.
+func (m model) viewFreePlay() string {
 	var sb strings.Builder
 
 	// Title.
@@ -460,10 +723,306 @@ func (m model) View() string {
 			sb.WriteString(selStyle.Render("  Piece selected — arrow keys to move, esc to deselect"))
 		} else {
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(
-				"  Arrows/hjkl: move  Enter/Space: select  n: new  e: editor  c: coords  ?: cheat  1/2/3: difficulty  q: quit"))
+				"  Arrows/hjkl: move  Enter/Space: select  n: new  e: editor  g: league  ?: cheat  1/2/3: difficulty  q: quit"))
 		}
 		sb.WriteString("\n")
 	}
+
+	return sb.String()
+}
+
+// viewNameInput renders the nickname entry screen.
+func (m model) viewNameInput() string {
+	var sb strings.Builder
+
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("255")).
+		Render("KLOTSKI PUZZLE")
+	sb.WriteString(title)
+	sb.WriteString("  ")
+	badge := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("0")).
+		Background(colorLeague).
+		Padding(0, 1).
+		Render("LEAGUE")
+	sb.WriteString(badge)
+	sb.WriteString("\n\n")
+
+	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true).Render("  Enter your nickname:"))
+	sb.WriteString("\n\n")
+
+	// Text input with cursor.
+	inputStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
+	cursorChar := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("_")
+	sb.WriteString("  > ")
+	sb.WriteString(inputStyle.Render(m.nameInput))
+	sb.WriteString(cursorChar)
+	sb.WriteString("\n\n")
+
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	sb.WriteString(helpStyle.Render("  Enter: confirm  Esc: cancel  q: quit"))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+// viewLeague renders the league puzzle browser.
+func (m model) viewLeague() string {
+	var sb strings.Builder
+
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("255")).
+		Render("KLOTSKI PUZZLE")
+	sb.WriteString(title)
+	sb.WriteString("  ")
+	badge := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("0")).
+		Background(colorLeague).
+		Padding(0, 1).
+		Render("LEAGUE")
+	sb.WriteString(badge)
+
+	// Player name.
+	sb.WriteString("  ")
+	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true).Render(m.nickname))
+
+	sb.WriteString("\n\n")
+
+	pd := m.saveData.player(m.nickname)
+	maxIdx := pd.highestUnlocked()
+
+	// Summary line.
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	sb.WriteString(dimStyle.Render(fmt.Sprintf("  Score: %d/%d  Completed: %d/%d",
+		pd.totalScore(), maxLeagueScore(), pd.completed(), len(presets))))
+	sb.WriteString("\n\n")
+
+	// Puzzle list.
+	end := m.leagueScroll + leagueVisible
+	if end > len(presets) {
+		end = len(presets)
+	}
+
+	for i := m.leagueScroll; i < end; i++ {
+		p := presets[i]
+		selected := i == m.leagueIdx
+		locked := i > maxIdx
+		score, scored := pd.Scores[i]
+
+		var line string
+		numStr := fmt.Sprintf("%3d.", i+1)
+		optStr := fmt.Sprintf("(%d moves)", p.Optimal)
+
+		if locked {
+			lockStyle := lipgloss.NewStyle().Foreground(colorLocked)
+			line = lockStyle.Render(fmt.Sprintf("  %s  locked  %s", numStr, optStr))
+		} else if scored {
+			scoreStyle := lipgloss.NewStyle().Foreground(colorScored)
+			dimOptStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+			line = fmt.Sprintf("  %s  %s  %s",
+				lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Render(numStr),
+				scoreStyle.Render(fmt.Sprintf("%d/10", score)),
+				dimOptStyle.Render(optStr))
+		} else {
+			// Unlocked but not yet scored.
+			line = fmt.Sprintf("  %s  %s  %s",
+				lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true).Render(numStr),
+				lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(" --  "),
+				lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(optStr))
+		}
+
+		if selected {
+			// Highlight with a cursor indicator.
+			sb.WriteString(lipgloss.NewStyle().Foreground(colorCursor).Bold(true).Render("> "))
+			sb.WriteString(line)
+		} else {
+			sb.WriteString("  ")
+			sb.WriteString(line)
+		}
+		sb.WriteString("\n")
+	}
+
+	// Scroll indicators.
+	if m.leagueScroll > 0 {
+		sb.WriteString(dimStyle.Render(fmt.Sprintf("  ... %d more above", m.leagueScroll)))
+		sb.WriteString("\n")
+	}
+	if end < len(presets) {
+		sb.WriteString(dimStyle.Render(fmt.Sprintf("  ... %d more below", len(presets)-end)))
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n")
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	sb.WriteString(helpStyle.Render("  Arrows/jk: browse  Enter: play  Tab: leaderboard  @: switch player  Esc: back  q: quit"))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+// viewLeaguePlay renders the league play screen (similar to free play but with league info).
+func (m model) viewLeaguePlay() string {
+	var sb strings.Builder
+
+	// Title.
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("255")).
+		Render("KLOTSKI PUZZLE")
+	sb.WriteString(title)
+
+	// League badge.
+	sb.WriteString("  ")
+	badge := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("0")).
+		Background(colorLeague).
+		Padding(0, 1).
+		Render(fmt.Sprintf("LEAGUE #%d", m.leagueIdx+1))
+	sb.WriteString(badge)
+
+	if m.optimal > 0 {
+		optStr := fmt.Sprintf("  Best: %d moves", m.optimal)
+		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(optStr))
+	}
+
+	if m.cheatMode {
+		sb.WriteString("  ")
+		cheatBadge := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("0")).
+			Background(colorHintFg).
+			Padding(0, 1).
+			Render("CHEAT")
+		sb.WriteString(cheatBadge)
+	}
+	sb.WriteString("\n\n")
+
+	m.renderBoard(&sb)
+
+	sb.WriteString("\n")
+
+	// Status: moves.
+	movesStr := fmt.Sprintf("  Moves: %d", m.board.Moves)
+	if len(m.history) > 0 {
+		movesStr += "  (u: undo  U: restart)"
+	}
+	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(movesStr))
+	sb.WriteString("\n")
+
+	// Show current best score for this puzzle.
+	pd := m.saveData.player(m.nickname)
+	if prevScore, ok := pd.Scores[m.leagueIdx]; ok {
+		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(
+			fmt.Sprintf("  Current best: %d/10", prevScore)))
+		sb.WriteString("\n")
+	}
+
+	// Hint display (cheat mode).
+	if m.cheatMode && !m.won {
+		hintStyle := lipgloss.NewStyle().Foreground(colorHintFg).Bold(true)
+		if m.hintLoading {
+			sb.WriteString(hintStyle.Render("  Computing hint..."))
+			sb.WriteString("\n")
+		} else if m.hint != nil {
+			sb.WriteString(hintStyle.Render(fmt.Sprintf("  Hint: %s", dirArrow(m.hint.Dir))))
+			sb.WriteString("\n")
+		}
+	}
+
+	if m.won {
+		winStyle := lipgloss.NewStyle().Bold(true).Foreground(colorWin)
+		sb.WriteString("\n")
+		sb.WriteString(winStyle.Render(fmt.Sprintf("  YOU WIN in %d moves!", m.board.Moves)))
+		if m.board.Moves == m.optimal {
+			sb.WriteString(winStyle.Render("  PERFECT!"))
+		}
+		sb.WriteString("\n")
+		// Score line.
+		scoreStr := fmt.Sprintf("  Score: %d/10", m.leagueScore)
+		if m.leagueNewBest {
+			scoreStr += "  NEW BEST!"
+		}
+		sb.WriteString(winStyle.Render(scoreStr))
+		sb.WriteString("\n")
+		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  u: undo  U: restart (retry for better score)  Esc: back to league  q: quit"))
+		sb.WriteString("\n")
+	} else {
+		sb.WriteString("\n")
+		if m.selected != -1 {
+			selStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("46"))
+			sb.WriteString(selStyle.Render("  Piece selected — arrow keys to move, esc to deselect"))
+		} else {
+			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(
+				"  Arrows/hjkl: move  Enter/Space: select  c: coords  ?: cheat  Esc: back to league  q: quit"))
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// viewLeaderboard renders the leaderboard.
+func (m model) viewLeaderboard() string {
+	var sb strings.Builder
+
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("255")).
+		Render("KLOTSKI PUZZLE")
+	sb.WriteString(title)
+	sb.WriteString("  ")
+	badge := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("0")).
+		Background(colorLeague).
+		Padding(0, 1).
+		Render("LEADERBOARD")
+	sb.WriteString(badge)
+	sb.WriteString("\n\n")
+
+	entries := m.saveData.leaderboard()
+
+	if len(entries) == 0 {
+		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  No players yet."))
+		sb.WriteString("\n")
+	} else {
+		// Header.
+		headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Bold(true)
+		sb.WriteString(headerStyle.Render(fmt.Sprintf("  %-4s  %-20s  %6s  %9s", "Rank", "Player", "Score", "Completed")))
+		sb.WriteString("\n")
+		sb.WriteString(headerStyle.Render("  " + strings.Repeat("-", 45)))
+		sb.WriteString("\n")
+
+		for i, e := range entries {
+			rankStyle := lipgloss.NewStyle().Foreground(colorRank).Bold(true)
+			nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("255"))
+			scoreStyle := lipgloss.NewStyle().Foreground(colorScored)
+			dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+
+			// Highlight current player.
+			if e.Name == m.nickname {
+				nameStyle = nameStyle.Bold(true).Foreground(lipgloss.Color("220"))
+			}
+
+			sb.WriteString(fmt.Sprintf("  %s  %s  %s  %s",
+				rankStyle.Render(fmt.Sprintf("%-4s", fmt.Sprintf("#%d", i+1))),
+				nameStyle.Render(fmt.Sprintf("%-20s", e.Name)),
+				scoreStyle.Render(fmt.Sprintf("%6d", e.Total)),
+				dimStyle.Render(fmt.Sprintf("%5d/%d", e.Completed, len(presets))),
+			))
+			sb.WriteString("\n")
+		}
+	}
+
+	sb.WriteString("\n")
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	sb.WriteString(helpStyle.Render("  Esc/Tab: back to league  q: quit"))
+	sb.WriteString("\n")
 
 	return sb.String()
 }
@@ -476,7 +1035,7 @@ func (m model) renderBoard(sb *strings.Builder) {
 	// Ghost piece for editor preview.
 	var ghost *Piece
 	var ghostGrid [BoardW][BoardH]bool
-	if m.editing && m.board.PieceAt(m.cursorX, m.cursorY) == -1 {
+	if m.mode == modeEditor && m.board.PieceAt(m.cursorX, m.cursorY) == -1 {
 		candidate := Piece{Kind: m.editPiece, X: m.cursorX, Y: m.cursorY}
 		if m.board.CanPlace(candidate) {
 			ghost = &candidate
@@ -690,7 +1249,7 @@ func (m model) renderCell(x, y, idx, line int, ghost *Piece, ghostGrid [BoardW][
 				cursorStyle = cursorStyle.Background(colorHint)
 			}
 			cursorLabel := "[*]"
-			if m.editing && idx == -1 {
+			if m.mode == modeEditor && idx == -1 {
 				cursorLabel = fmt.Sprintf("[%s]", editPieceShort(m.editPiece))
 			}
 			return cursorStyle.Render(fmt.Sprintf(" %s ", cursorLabel))
@@ -866,7 +1425,7 @@ func (m model) updateEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Cancel — exit editor, generate a random board.
 	case "esc":
-		m.editing = false
+		m.mode = modeFreePlay
 		m.editError = ""
 		m.loading = true
 		return m, generateBoardCmd(m.difficulty)
