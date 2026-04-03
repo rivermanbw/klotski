@@ -23,6 +23,10 @@ var (
 	colorHard   = lipgloss.Color("196") // red
 	colorHint   = lipgloss.Color("53")  // dark purple for hint background
 	colorHintFg = lipgloss.Color("213") // bright pink for hint arrow/text
+	colorCustom = lipgloss.Color("45")  // cyan for custom badge
+	colorGhost  = lipgloss.Color("240") // dim gray for ghost preview
+	colorEditor = lipgloss.Color("177") // light purple for editor badge
+	colorError  = lipgloss.Color("196") // red for error messages
 )
 
 func diffColor(d Difficulty) lipgloss.Color {
@@ -33,6 +37,8 @@ func diffColor(d Difficulty) lipgloss.Color {
 		return colorMedDif
 	case Hard:
 		return colorHard
+	case Custom:
+		return colorCustom
 	}
 	return colorEasy
 }
@@ -48,6 +54,11 @@ type boardReadyMsg struct {
 type hintReadyMsg struct {
 	hint *Hint
 	seq  int // sequence number to discard stale results
+}
+
+// editorSolveMsg is sent when the editor's solvability check completes.
+type editorSolveMsg struct {
+	optimal int // -1 if unsolvable, otherwise the optimal move count
 }
 
 type model struct {
@@ -66,6 +77,12 @@ type model struct {
 	hint        *Hint // current hint (nil if unavailable or not computed)
 	hintLoading bool  // true while computing a hint
 	hintSeq     int   // sequence counter to discard stale hint results
+
+	editing     bool      // true when in board editor mode
+	editPiece   PieceKind // currently selected piece type for placement
+	editError   string    // error message to display in editor
+	editSolving bool      // true while checking solvability
+	custom      bool      // true when playing a custom board
 }
 
 func initialModel() model {
@@ -88,6 +105,12 @@ func generateBoardCmd(diff Difficulty) tea.Cmd {
 func computeHintCmd(b *Board, seq int) tea.Cmd {
 	return func() tea.Msg {
 		return hintReadyMsg{hint: SolveNextMove(b), seq: seq}
+	}
+}
+
+func editorSolveCmd(b *Board) tea.Cmd {
+	return func() tea.Msg {
+		return editorSolveMsg{optimal: Solve(b)}
 	}
 }
 
@@ -123,6 +146,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cursorY = 0
 		m.hint = nil
 		m.hintLoading = false
+		m.custom = false
 		if m.cheatMode {
 			m.hintSeq++
 			m.hintLoading = true
@@ -137,6 +161,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case editorSolveMsg:
+		m.editSolving = false
+		if msg.optimal == -1 {
+			m.editError = "Unsolvable! Adjust pieces and try again."
+			return m, nil
+		}
+		// Transition to play mode with the custom board.
+		m.editing = false
+		m.optimal = msg.optimal
+		m.difficulty = Custom
+		m.custom = true
+		m.won = false
+		m.selected = -1
+		m.history = nil
+		m.cursorX = 0
+		m.cursorY = 0
+		m.board.Moves = 0
+		m.editError = ""
+		m.hint = nil
+		m.hintLoading = false
+		if m.cheatMode {
+			m.hintSeq++
+			m.hintLoading = true
+			return m, computeHintCmd(m.board.Clone(), m.hintSeq)
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		key := msg.String()
 
@@ -145,8 +196,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		// Route to editor handler when in editor mode.
+		if m.editing {
+			return m.updateEditor(msg)
+		}
+
 		// Ignore other keys while generating.
 		if m.loading {
+			return m, nil
+		}
+
+		// Enter editor mode.
+		if key == "e" && !m.won {
+			m.editing = true
+			m.board = &Board{Pieces: []Piece{}}
+			m.cursorX = 0
+			m.cursorY = 0
+			m.selected = -1
+			m.editPiece = Large
+			m.editError = ""
+			m.editSolving = false
+			m.hint = nil
+			m.hintLoading = false
 			return m, nil
 		}
 
@@ -163,11 +234,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.difficulty = d
 			m.loading = true
+			m.custom = false
 			return m, generateBoardCmd(d)
 		}
 
-		// New game (same difficulty).
+		// New game (same difficulty) — if custom, exit custom mode.
 		if key == "n" {
+			if m.custom {
+				m.difficulty = Easy
+				m.custom = false
+			}
 			m.loading = true
 			return m, generateBoardCmd(m.difficulty)
 		}
@@ -277,6 +353,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
+	if m.editing {
+		return m.viewEditor()
+	}
+
 	var sb strings.Builder
 
 	// Title.
@@ -322,85 +402,7 @@ func (m model) View() string {
 		return sb.String()
 	}
 
-	grid := m.board.occupancy()
-
-	// Column headers (when coordinate system is enabled).
-	if m.showCoords {
-		coordStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-		sb.WriteString("   ")
-		for x := range BoardW {
-			sb.WriteString(coordStyle.Render(fmt.Sprintf("  %d  ", x)))
-			if x < BoardW-1 {
-				sb.WriteString(" ")
-			}
-		}
-		sb.WriteString("\n")
-	}
-
-	// Top border.
-	sb.WriteString("  ┌")
-	for x := range BoardW {
-		sb.WriteString("─────")
-		if x < BoardW-1 {
-			sb.WriteString("┬")
-		}
-	}
-	sb.WriteString("┐\n")
-
-	for y := range BoardH {
-		// Two lines per cell for visual height.
-		for line := 0; line < 2; line++ {
-			// Row label on first line of each row.
-			if m.showCoords && line == 0 {
-				coordStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-				sb.WriteString(coordStyle.Render(fmt.Sprintf("%d", y)))
-				sb.WriteString(" │")
-			} else {
-				sb.WriteString("  │")
-			}
-			for x := range BoardW {
-				idx := grid[x][y]
-				cellStr := m.renderCell(x, y, idx, line)
-				sb.WriteString(cellStr)
-				if x < BoardW-1 {
-					if idx != -1 && x+1 < BoardW && grid[x+1][y] == idx {
-						sb.WriteString(" ")
-					} else {
-						sb.WriteString("│")
-					}
-				}
-			}
-			sb.WriteString("│\n")
-		}
-
-		// Horizontal border between rows.
-		if y < BoardH-1 {
-			sb.WriteString("  ├")
-			for x := range BoardW {
-				top := grid[x][y]
-				bot := grid[x][y+1]
-				if top != -1 && top == bot {
-					sb.WriteString("     ")
-				} else {
-					sb.WriteString("─────")
-				}
-				if x < BoardW-1 {
-					sb.WriteString("┼")
-				}
-			}
-			sb.WriteString("┤\n")
-		}
-	}
-
-	// Bottom border.
-	sb.WriteString("  └")
-	for x := range BoardW {
-		sb.WriteString("─────")
-		if x < BoardW-1 {
-			sb.WriteString("┴")
-		}
-	}
-	sb.WriteString("┘\n")
+	m.renderBoard(&sb)
 
 	sb.WriteString("\n")
 
@@ -441,7 +443,7 @@ func (m model) View() string {
 			sb.WriteString(selStyle.Render("  Piece selected — arrow keys to move, esc to deselect"))
 		} else {
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(
-				"  Arrows/hjkl: move  Enter/Space: select  n: new  c: coords  ?: cheat  1/2/3: difficulty  q: quit"))
+				"  Arrows/hjkl: move  Enter/Space: select  n: new  e: editor  c: coords  ?: cheat  1/2/3: difficulty  q: quit"))
 		}
 		sb.WriteString("\n")
 	}
@@ -449,13 +451,156 @@ func (m model) View() string {
 	return sb.String()
 }
 
-func (m model) renderCell(x, y, idx, line int) string {
+// renderBoard draws the grid (with box-drawing borders) into the string builder.
+// It is shared between the play mode View and the editor viewEditor.
+func (m model) renderBoard(sb *strings.Builder) {
+	grid := m.board.occupancy()
+
+	// Ghost piece for editor preview.
+	var ghost *Piece
+	var ghostGrid [BoardW][BoardH]bool
+	if m.editing && m.board.PieceAt(m.cursorX, m.cursorY) == -1 {
+		candidate := Piece{Kind: m.editPiece, X: m.cursorX, Y: m.cursorY}
+		if m.board.CanPlace(candidate) {
+			ghost = &candidate
+			for _, c := range candidate.Cells() {
+				ghostGrid[c[0]][c[1]] = true
+			}
+		}
+	}
+
+	// Column headers (when coordinate system is enabled).
+	if m.showCoords {
+		coordStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+		sb.WriteString("   ")
+		for x := range BoardW {
+			sb.WriteString(coordStyle.Render(fmt.Sprintf("  %d  ", x)))
+			if x < BoardW-1 {
+				sb.WriteString(" ")
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// Top border.
+	sb.WriteString("  ┌")
+	for x := range BoardW {
+		sb.WriteString("─────")
+		if x < BoardW-1 {
+			sb.WriteString("┬")
+		}
+	}
+	sb.WriteString("┐\n")
+
+	for y := range BoardH {
+		// Two lines per cell for visual height.
+		for line := 0; line < 2; line++ {
+			// Row label on first line of each row.
+			if m.showCoords && line == 0 {
+				coordStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+				sb.WriteString(coordStyle.Render(fmt.Sprintf("%d", y)))
+				sb.WriteString(" │")
+			} else {
+				sb.WriteString("  │")
+			}
+			for x := range BoardW {
+				idx := grid[x][y]
+				cellStr := m.renderCell(x, y, idx, line, ghost, ghostGrid)
+				sb.WriteString(cellStr)
+				if x < BoardW-1 {
+					// Check if we should merge border with ghost cells.
+					sameReal := idx != -1 && x+1 < BoardW && grid[x+1][y] == idx
+					sameGhost := ghost != nil && ghostGrid[x][y] && ghostGrid[x+1][y]
+					if sameReal || sameGhost {
+						sb.WriteString(" ")
+					} else {
+						sb.WriteString("│")
+					}
+				}
+			}
+			sb.WriteString("│\n")
+		}
+
+		// Horizontal border between rows.
+		if y < BoardH-1 {
+			sb.WriteString("  ├")
+			for x := range BoardW {
+				top := grid[x][y]
+				bot := grid[x][y+1]
+				sameReal := top != -1 && top == bot
+				sameGhost := ghost != nil && ghostGrid[x][y] && ghostGrid[x][y+1]
+				if sameReal || sameGhost {
+					sb.WriteString("     ")
+				} else {
+					sb.WriteString("─────")
+				}
+				if x < BoardW-1 {
+					sb.WriteString("┼")
+				}
+			}
+			sb.WriteString("┤\n")
+		}
+	}
+
+	// Bottom border.
+	sb.WriteString("  └")
+	for x := range BoardW {
+		sb.WriteString("─────")
+		if x < BoardW-1 {
+			sb.WriteString("┴")
+		}
+	}
+	sb.WriteString("┘\n")
+}
+
+func (m model) renderCell(x, y, idx, line int, ghost *Piece, ghostGrid [BoardW][BoardH]bool) string {
 	isCursor := (x == m.cursorX && y == m.cursorY)
 	isSelected := (idx != -1 && idx == m.selected)
 	isHinted := m.cheatMode && m.hint != nil && idx != -1 && idx == m.hint.PieceIndex && !m.won
+	isGhost := ghost != nil && ghostGrid[x][y]
 
 	var label string
 	var fg lipgloss.Color
+
+	if isGhost && idx == -1 {
+		// Ghost preview cell.
+		fg = colorGhost
+		switch ghost.Kind {
+		case Small:
+			if line == 0 {
+				label = "  s  "
+			} else {
+				label = "     "
+			}
+		case Vertical:
+			if line == 0 && y == ghost.Y {
+				label = "  m  "
+			} else if line == 1 && y == ghost.Y+1 {
+				label = "  m  "
+			} else {
+				label = "     "
+			}
+		case Horizontal:
+			if line == 0 {
+				label = "  m  "
+			} else {
+				label = "     "
+			}
+		case Large:
+			if line == 0 {
+				label = "  L  "
+			} else {
+				label = "     "
+			}
+		}
+		style := lipgloss.NewStyle().Foreground(fg)
+		// Show cursor on ghost origin cell.
+		if isCursor && line == 0 {
+			cursorStyle := lipgloss.NewStyle().Foreground(colorCursor).Bold(true)
+			return cursorStyle.Render(fmt.Sprintf(" [%s] ", editPieceShort(ghost.Kind)))
+		}
+		return style.Render(label)
+	}
 
 	if idx == -1 {
 		label = "     "
@@ -527,12 +672,266 @@ func (m model) renderCell(x, y, idx, line int) string {
 			} else if isHinted {
 				cursorStyle = cursorStyle.Background(colorHint)
 			}
-			return cursorStyle.Render(" [*] ")
+			cursorLabel := "[*]"
+			if m.editing && idx == -1 {
+				cursorLabel = fmt.Sprintf("[%s]", editPieceShort(m.editPiece))
+			}
+			return cursorStyle.Render(fmt.Sprintf(" %s ", cursorLabel))
 		}
 		style = style.Bold(true)
 	}
 
 	return style.Render(label)
+}
+
+// editPieceShort returns a short label for a piece kind (used in cursor).
+func editPieceShort(k PieceKind) string {
+	switch k {
+	case Large:
+		return "L"
+	case Vertical:
+		return "V"
+	case Horizontal:
+		return "H"
+	case Small:
+		return "s"
+	}
+	return "?"
+}
+
+// editPieceLabel returns a descriptive label for the piece selector.
+func editPieceLabel(k PieceKind) string {
+	switch k {
+	case Large:
+		return "Large 2x2"
+	case Vertical:
+		return "Vertical 1x2"
+	case Horizontal:
+		return "Horizontal 2x1"
+	case Small:
+		return "Small 1x1"
+	}
+	return "?"
+}
+
+// editPieceColor returns the display color for a piece kind.
+func editPieceColor(k PieceKind) lipgloss.Color {
+	switch k {
+	case Large:
+		return colorLarge
+	case Horizontal, Vertical:
+		return colorMedium
+	case Small:
+		return colorSmall
+	}
+	return colorEmpty
+}
+
+// countPieces counts pieces by kind on the board.
+func countPieces(b *Board) (large, vert, horiz, small int) {
+	for _, p := range b.Pieces {
+		switch p.Kind {
+		case Large:
+			large++
+		case Vertical:
+			vert++
+		case Horizontal:
+			horiz++
+		case Small:
+			small++
+		}
+	}
+	return
+}
+
+// validateEditor checks if the editor board is valid for play.
+// Returns an error message, or empty string if valid.
+func validateEditor(b *Board) string {
+	l, _, _, _ := countPieces(b)
+	if l == 0 {
+		return "Need exactly 1 Large (2x2) piece."
+	}
+	if l > 1 {
+		return "Too many Large pieces (max 1)."
+	}
+	if b.IsWon() {
+		return "Large piece is already at the goal!"
+	}
+	// Count occupied cells — need at least 2 empty for movement.
+	occupied := 0
+	for _, p := range b.Pieces {
+		occupied += len(p.Cells())
+	}
+	if BoardW*BoardH-occupied < 2 {
+		return "Need at least 2 empty cells."
+	}
+	return ""
+}
+
+// updateEditor handles key events in editor mode.
+func (m model) updateEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	// Don't allow most actions while solving.
+	if m.editSolving {
+		return m, nil
+	}
+
+	switch key {
+	// Move cursor.
+	case "up", "k":
+		if m.cursorY > 0 {
+			m.cursorY--
+		}
+	case "down", "j":
+		if m.cursorY < BoardH-1 {
+			m.cursorY++
+		}
+	case "left", "h":
+		if m.cursorX > 0 {
+			m.cursorX--
+		}
+	case "right", "l":
+		if m.cursorX < BoardW-1 {
+			m.cursorX++
+		}
+
+	// Cycle piece type.
+	case "tab":
+		m.editError = ""
+		switch m.editPiece {
+		case Large:
+			m.editPiece = Vertical
+		case Vertical:
+			m.editPiece = Horizontal
+		case Horizontal:
+			m.editPiece = Small
+		case Small:
+			m.editPiece = Large
+		}
+
+	// Place piece.
+	case "enter", " ":
+		m.editError = ""
+		p := Piece{Kind: m.editPiece, X: m.cursorX, Y: m.cursorY}
+		if m.board.CanPlace(p) {
+			m.board.Pieces = append(m.board.Pieces, p)
+		} else {
+			m.editError = "Can't place here — overlaps or out of bounds."
+		}
+
+	// Remove piece at cursor.
+	case "x", "backspace", "delete":
+		m.editError = ""
+		if !m.board.RemovePieceAt(m.cursorX, m.cursorY) {
+			m.editError = "No piece here to remove."
+		}
+
+	// Clear board.
+	case "r":
+		m.board = &Board{Pieces: []Piece{}}
+		m.editError = ""
+
+	// Toggle coordinates.
+	case "c":
+		m.showCoords = !m.showCoords
+
+	// Play — validate and solve.
+	case "p":
+		m.editError = ""
+		if errMsg := validateEditor(m.board); errMsg != "" {
+			m.editError = errMsg
+			return m, nil
+		}
+		m.editSolving = true
+		m.editError = ""
+		return m, editorSolveCmd(m.board.Clone())
+
+	// Cancel — exit editor, generate a random board.
+	case "esc":
+		m.editing = false
+		m.editError = ""
+		m.loading = true
+		return m, generateBoardCmd(m.difficulty)
+	}
+
+	return m, nil
+}
+
+// viewEditor renders the editor UI.
+func (m model) viewEditor() string {
+	var sb strings.Builder
+
+	// Title.
+	title := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("255")).
+		Render("KLOTSKI PUZZLE")
+	sb.WriteString(title)
+
+	// Editor badge.
+	sb.WriteString("  ")
+	badge := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("0")).
+		Background(colorEditor).
+		Padding(0, 1).
+		Render("EDITOR")
+	sb.WriteString(badge)
+	sb.WriteString("\n\n")
+
+	// Piece selector.
+	kinds := []PieceKind{Large, Vertical, Horizontal, Small}
+	sb.WriteString("  Piece: ")
+	for i, k := range kinds {
+		style := lipgloss.NewStyle().Foreground(editPieceColor(k))
+		if k == m.editPiece {
+			style = style.Bold(true).Underline(true)
+		}
+		sb.WriteString(style.Render(editPieceLabel(k)))
+		if i < len(kinds)-1 {
+			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  "))
+		}
+	}
+	sb.WriteString("\n")
+
+	// Piece counts.
+	l, v, h, s := countPieces(m.board)
+	occupied := 0
+	for _, p := range m.board.Pieces {
+		occupied += len(p.Cells())
+	}
+	empty := BoardW*BoardH - occupied
+	countStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	sb.WriteString(countStyle.Render(fmt.Sprintf("  L:%d  V:%d  H:%d  S:%d  Empty:%d", l, v, h, s, empty)))
+	sb.WriteString("\n\n")
+
+	m.renderBoard(&sb)
+
+	sb.WriteString("\n")
+
+	// Error message.
+	if m.editError != "" {
+		errStyle := lipgloss.NewStyle().Foreground(colorError).Bold(true)
+		sb.WriteString(errStyle.Render("  " + m.editError))
+		sb.WriteString("\n")
+	}
+
+	// Solving indicator.
+	if m.editSolving {
+		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  Checking solvability..."))
+		sb.WriteString("\n")
+	}
+
+	// Help.
+	sb.WriteString("\n")
+	helpStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	sb.WriteString(helpStyle.Render("  Arrows/hjkl: move cursor  Tab: cycle piece  Enter/Space: place"))
+	sb.WriteString("\n")
+	sb.WriteString(helpStyle.Render("  x/Backspace: remove  r: clear  c: coords  p: play  Esc: cancel  q: quit"))
+	sb.WriteString("\n")
+
+	return sb.String()
 }
 
 func main() {

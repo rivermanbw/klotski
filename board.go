@@ -167,6 +167,32 @@ func dirDelta(dir Direction) (int, int) {
 	return 0, 0
 }
 
+// CanPlace checks if a piece can be placed on the board without going out of
+// bounds or overlapping existing pieces.
+func (b *Board) CanPlace(p Piece) bool {
+	grid := b.occupancy()
+	for _, c := range p.Cells() {
+		if c[0] < 0 || c[0] >= BoardW || c[1] < 0 || c[1] >= BoardH {
+			return false
+		}
+		if grid[c[0]][c[1]] != -1 {
+			return false
+		}
+	}
+	return true
+}
+
+// RemovePieceAt removes the piece occupying (x, y) and returns true,
+// or returns false if the cell is empty.
+func (b *Board) RemovePieceAt(x, y int) bool {
+	idx := b.PieceAt(x, y)
+	if idx == -1 {
+		return false
+	}
+	b.Pieces = append(b.Pieces[:idx], b.Pieces[idx+1:]...)
+	return true
+}
+
 // NewRandomBoard generates a random valid starting position that matches
 // the given difficulty. It repeatedly generates random layouts, solves each
 // with BFS, and returns the first one whose optimal move count falls within

@@ -9,6 +9,7 @@ const (
 	Easy Difficulty = iota
 	Medium
 	Hard
+	Custom
 )
 
 func (d Difficulty) String() string {
@@ -19,6 +20,8 @@ func (d Difficulty) String() string {
 		return "Medium"
 	case Hard:
 		return "Hard"
+	case Custom:
+		return "Custom"
 	}
 	return "?"
 }
