@@ -269,13 +269,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Undo.
-		if key == "u" && len(m.history) > 0 && !m.won {
+		if key == "u" && len(m.history) > 0 {
 			m.board = m.history[len(m.history)-1]
 			m.history = m.history[:len(m.history)-1]
 			m.selected = -1
+			m.won = false
 			if m.cheatMode {
 				m.hintSeq++
 				m.hint = nil
+				m.hintLoading = true
+				return m, computeHintCmd(m.board.Clone(), m.hintSeq)
+			}
+			return m, nil
+		}
+
+		// Reset to starting state.
+		if key == "U" && len(m.history) > 0 {
+			m.board = m.history[0]
+			m.history = nil
+			m.selected = -1
+			m.won = false
+			m.hint = nil
+			m.hintLoading = false
+			if m.cheatMode {
+				m.hintSeq++
 				m.hintLoading = true
 				return m, computeHintCmd(m.board.Clone(), m.hintSeq)
 			}
@@ -409,7 +426,7 @@ func (m model) View() string {
 	// Status: moves.
 	movesStr := fmt.Sprintf("  Moves: %d", m.board.Moves)
 	if len(m.history) > 0 {
-		movesStr += "  (u to undo)"
+		movesStr += "  (u: undo  U: restart)"
 	}
 	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(movesStr))
 	sb.WriteString("\n")
@@ -434,7 +451,7 @@ func (m model) View() string {
 			sb.WriteString(winStyle.Render("  PERFECT!"))
 		}
 		sb.WriteString("\n")
-		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  n: new game  1/2/3: change difficulty  q: quit"))
+		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("  u: undo  U: restart  n: new game  1/2/3: change difficulty  q: quit"))
 		sb.WriteString("\n")
 	} else {
 		sb.WriteString("\n")

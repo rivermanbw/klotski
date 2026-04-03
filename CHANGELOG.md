@@ -22,3 +22,7 @@
 - "CHEAT" badge displayed in the title bar
 - Hints recomputed automatically after each move, undo, or new game
 - Async BFS computation prevents UI blocking
+
+### Undo / Restart
+- `u` undo and `U` restart now work in the win state
+- `U` resets the board to its starting position in a single keypress
