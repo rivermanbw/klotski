@@ -23,13 +23,13 @@ const (
 
 // Colors for piece types.
 var (
-	colorSmall       = lipgloss.Color("214") // orange
-	colorMedium      = lipgloss.Color("39")  // blue
-	colorMediumGreen = lipgloss.Color("82")  // green
-	colorLarge       = lipgloss.Color("196") // red
-	colorEmpty       = lipgloss.Color("236") // dark gray
-	colorCursor      = lipgloss.Color("226") // yellow
-	colorWin         = lipgloss.Color("82")  // bright green
+	colorSmall            = lipgloss.Color("214") // orange
+	colorMediumVertical   = lipgloss.Color("39")  // blue
+	colorMediumHorizontal = lipgloss.Color("82")  // green
+	colorLarge            = lipgloss.Color("196") // red
+	colorEmpty            = lipgloss.Color("236") // dark gray
+	colorCursor           = lipgloss.Color("226") // yellow
+	colorWin              = lipgloss.Color("82")  // bright green
 
 	colorEasy   = lipgloss.Color("82")  // green
 	colorMedDif = lipgloss.Color("214") // orange
@@ -1337,7 +1337,7 @@ func (m model) renderCell(x, y, idx, line int, ghost *Piece, ghostGrid [BoardW][
 				label = "     "
 			}
 		case Vertical:
-			fg = colorMedium
+			fg = colorMediumVertical
 			if line == 0 && y == p.Y {
 				label = "  m  "
 			} else if line == 1 && y == p.Y+1 {
@@ -1346,7 +1346,7 @@ func (m model) renderCell(x, y, idx, line int, ghost *Piece, ghostGrid [BoardW][
 				label = "     "
 			}
 		case Horizontal:
-			fg = colorMediumGreen
+			fg = colorMediumHorizontal
 			if line == 0 {
 				label = "  m  "
 			} else {
@@ -1442,9 +1442,9 @@ func editPieceColor(k PieceKind) lipgloss.Color {
 	case Large:
 		return colorLarge
 	case Horizontal:
-		return colorMediumGreen
+		return colorMediumHorizontal
 	case Vertical:
-		return colorMedium
+		return colorMediumVertical
 	case Small:
 		return colorSmall
 	}

@@ -169,7 +169,7 @@ func writePresetsFile(t *testing.T, all []generatedPuzzle) {
 
 	sb.WriteString("}\n")
 
-	if err := os.WriteFile("presets.go", []byte(sb.String()), 0644); err != nil {
+	if err := os.WriteFile("presets.go", []byte(sb.String()), 0o644); err != nil {
 		t.Fatalf("Failed to write presets.go: %v", err)
 	}
 	t.Logf("Wrote presets.go with %d puzzles", len(all))
