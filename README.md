@@ -16,7 +16,9 @@ Empty target cells display a dim `L` to indicate where the large block must go.
 ![Game Mechanics Demo](demo.gif)
 
 The demo shows cursor navigation, piece selection and movement, undo, cheat mode
-(optimal next move hint), difficulty switching, and coordinate labels.
+(optimal next move hint), difficulty switching, and coordinate labels. Each piece
+type is visually distinguished by a colored background tint — amber for small,
+navy for vertical, green for horizontal, and red for the large block.
 
 To regenerate the GIF with [VHS](https://github.com/charmbracelet/vhs):
 
