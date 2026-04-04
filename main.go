@@ -23,12 +23,13 @@ const (
 
 // Colors for piece types.
 var (
-	colorSmall  = lipgloss.Color("214") // orange
-	colorMedium = lipgloss.Color("39")  // blue
-	colorLarge  = lipgloss.Color("196") // red
-	colorEmpty  = lipgloss.Color("236") // dark gray
-	colorCursor = lipgloss.Color("226") // yellow
-	colorWin    = lipgloss.Color("82")  // bright green
+	colorSmall       = lipgloss.Color("214") // orange
+	colorMedium      = lipgloss.Color("39")  // blue
+	colorMediumGreen = lipgloss.Color("82")  // green
+	colorLarge       = lipgloss.Color("196") // red
+	colorEmpty       = lipgloss.Color("236") // dark gray
+	colorCursor      = lipgloss.Color("226") // yellow
+	colorWin         = lipgloss.Color("82")  // bright green
 
 	colorEasy   = lipgloss.Color("82")  // green
 	colorMedDif = lipgloss.Color("214") // orange
@@ -43,6 +44,21 @@ var (
 	colorLocked = lipgloss.Color("240") // dim for locked puzzles
 	colorScored = lipgloss.Color("82")  // green for scored puzzles
 	colorRank   = lipgloss.Color("220") // gold for rank numbers
+
+	// Piece background colours (subtle dark tints).
+	bgSmall      = lipgloss.Color("58") // dark amber   rgb(95,95,0)
+	bgVertical   = lipgloss.Color("17") // dark navy    rgb(0,0,95)
+	bgHorizontal = lipgloss.Color("22") // dark green   rgb(0,95,0)
+	bgLarge      = lipgloss.Color("52") // dark red     rgb(95,0,0)
+
+	// Selected piece backgrounds (brighter version of piece colour).
+	bgSelSmall      = lipgloss.Color("94") // medium amber rgb(135,95,0)
+	bgSelVertical   = lipgloss.Color("18") // medium blue  rgb(0,0,135)
+	bgSelHorizontal = lipgloss.Color("28") // medium green rgb(0,135,0)
+	bgSelLarge      = lipgloss.Color("88") // medium red   rgb(135,0,0)
+
+	// Win state background for the Large piece.
+	bgWinLarge = lipgloss.Color("22") // dark green (matches win theme)
 )
 
 func diffColor(d Difficulty) lipgloss.Color {
@@ -1188,7 +1204,13 @@ func (m model) renderBoard(sb *strings.Builder) {
 					sameReal := idx != -1 && x+1 < BoardW && grid[x+1][y] == idx
 					sameGhost := ghost != nil && ghostGrid[x][y] && ghostGrid[x+1][y]
 					if sameReal || sameGhost {
-						sb.WriteString(" ")
+						if sameReal {
+							bg := m.cellBg(idx)
+							s := lipgloss.NewStyle().Background(bg)
+							sb.WriteString(s.Render(" "))
+						} else {
+							sb.WriteString(" ")
+						}
 					} else {
 						sb.WriteString("│")
 					}
@@ -1206,12 +1228,29 @@ func (m model) renderBoard(sb *strings.Builder) {
 				sameReal := top != -1 && top == bot
 				sameGhost := ghost != nil && ghostGrid[x][y] && ghostGrid[x][y+1]
 				if sameReal || sameGhost {
-					sb.WriteString("     ")
+					if sameReal {
+						bg := m.cellBg(top)
+						s := lipgloss.NewStyle().Background(bg)
+						sb.WriteString(s.Render("     "))
+					} else {
+						sb.WriteString("     ")
+					}
 				} else {
 					sb.WriteString("─────")
 				}
 				if x < BoardW-1 {
-					sb.WriteString("┼")
+					// Merge junction when all 4 surrounding cells are the same piece.
+					tl := grid[x][y]
+					tr := grid[x+1][y]
+					bl := grid[x][y+1]
+					br := grid[x+1][y+1]
+					if tl != -1 && tl == tr && tl == bl && tl == br {
+						bg := m.cellBg(tl)
+						s := lipgloss.NewStyle().Background(bg)
+						sb.WriteString(s.Render(" "))
+					} else {
+						sb.WriteString("┼")
+					}
 				}
 			}
 			sb.WriteString("┤\n")
@@ -1231,7 +1270,6 @@ func (m model) renderBoard(sb *strings.Builder) {
 
 func (m model) renderCell(x, y, idx, line int, ghost *Piece, ghostGrid [BoardW][BoardH]bool) string {
 	isCursor := (x == m.cursorX && y == m.cursorY)
-	isSelected := (idx != -1 && idx == m.selected)
 	isHinted := m.cheatMode && m.hint != nil && idx != -1 && idx == m.hint.PieceIndex && !m.won
 	isGhost := ghost != nil && ghostGrid[x][y]
 
@@ -1308,7 +1346,7 @@ func (m model) renderCell(x, y, idx, line int, ghost *Piece, ghostGrid [BoardW][
 				label = "     "
 			}
 		case Horizontal:
-			fg = colorMedium
+			fg = colorMediumGreen
 			if line == 0 {
 				label = "  m  "
 			} else {
@@ -1329,20 +1367,20 @@ func (m model) renderCell(x, y, idx, line int, ghost *Piece, ghostGrid [BoardW][
 
 	style := lipgloss.NewStyle().Foreground(fg)
 
-	if isHinted && !isSelected {
-		style = style.Background(colorHint)
-	}
-	if isSelected {
-		style = style.Background(lipgloss.Color("22"))
+	// Apply piece background: normal tint, then override for selection/hint.
+	if idx != -1 {
+		bg := m.cellBg(idx)
+		if bg != "" {
+			style = style.Background(bg)
+		}
 	}
 
 	// Show direction arrow on line 1 of the hinted piece's origin cell.
 	if isHinted && line == 1 && x == m.board.Pieces[idx].X && y == m.board.Pieces[idx].Y {
 		arrowStyle := lipgloss.NewStyle().Foreground(colorHintFg).Bold(true)
-		if isSelected {
-			arrowStyle = arrowStyle.Background(lipgloss.Color("22"))
-		} else {
-			arrowStyle = arrowStyle.Background(colorHint)
+		bg := m.cellBg(idx)
+		if bg != "" {
+			arrowStyle = arrowStyle.Background(bg)
 		}
 		return arrowStyle.Render(fmt.Sprintf("  %s  ", dirArrow(m.hint.Dir)))
 	}
@@ -1350,10 +1388,11 @@ func (m model) renderCell(x, y, idx, line int, ghost *Piece, ghostGrid [BoardW][
 	if isCursor && !m.won {
 		if line == 0 {
 			cursorStyle := lipgloss.NewStyle().Foreground(colorCursor).Bold(true)
-			if isSelected {
-				cursorStyle = cursorStyle.Background(lipgloss.Color("22"))
-			} else if isHinted {
-				cursorStyle = cursorStyle.Background(colorHint)
+			if idx != -1 {
+				bg := m.cellBg(idx)
+				if bg != "" {
+					cursorStyle = cursorStyle.Background(bg)
+				}
 			}
 			cursorLabel := "[*]"
 			if m.mode == modeEditor && idx == -1 {
@@ -1402,12 +1441,63 @@ func editPieceColor(k PieceKind) lipgloss.Color {
 	switch k {
 	case Large:
 		return colorLarge
-	case Horizontal, Vertical:
+	case Horizontal:
+		return colorMediumGreen
+	case Vertical:
 		return colorMedium
 	case Small:
 		return colorSmall
 	}
 	return colorEmpty
+}
+
+// pieceBg returns the subtle dark background for a piece kind.
+func pieceBg(k PieceKind) lipgloss.Color {
+	switch k {
+	case Small:
+		return bgSmall
+	case Vertical:
+		return bgVertical
+	case Horizontal:
+		return bgHorizontal
+	case Large:
+		return bgLarge
+	}
+	return ""
+}
+
+// pieceSelBg returns the brighter background used when a piece is selected.
+func pieceSelBg(k PieceKind) lipgloss.Color {
+	switch k {
+	case Small:
+		return bgSelSmall
+	case Vertical:
+		return bgSelVertical
+	case Horizontal:
+		return bgSelHorizontal
+	case Large:
+		return bgSelLarge
+	}
+	return ""
+}
+
+// cellBg returns the effective background colour for a piece cell,
+// taking into account selection, hint and win state.
+func (m model) cellBg(idx int) lipgloss.Color {
+	if idx == -1 {
+		return ""
+	}
+	p := m.board.Pieces[idx]
+	if idx == m.selected {
+		return pieceSelBg(p.Kind)
+	}
+	if m.cheatMode && m.hint != nil && idx == m.hint.PieceIndex && !m.won {
+		return colorHint
+	}
+	if p.Kind == Large && m.won {
+		return bgWinLarge
+	}
+	return pieceBg(p.Kind)
 }
 
 // countPieces counts pieces by kind on the board.

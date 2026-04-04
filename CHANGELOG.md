@@ -33,6 +33,10 @@
 - `Esc` cancels the editor and generates a new random board
 
 ### Visual
+- Colorized game stones: each piece type now has a subtle dark-tinted background matching its color (amber for small, navy for vertical, green for horizontal, red for large)
+- Selected pieces glow brighter in their own color instead of a generic green highlight
+- Multi-cell pieces (vertical, horizontal, large) render as seamless colored tiles with merged internal borders
+- Win state: large piece background transitions from red to green on victory
 - Target cell indicator: empty cells in the 2x2 goal area (cols 1-2, rows 3-4) show a dim "L"
 - Score colors: 10-shade red-to-green gradient matching score value
 
