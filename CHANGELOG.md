@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Rust Port
+- Full rewrite of the game in Rust using `ratatui` + `crossterm`
+- Feature parity with the Go version: all 6 game modes (FreePlay, Editor, NameInput, League, LeaguePlay, Leaderboard)
+- BFS solver with canonical state encoding for interchangeable same-kind pieces
+- Background thread for board generation, hint computation, and editor solvability checks via `mpsc::channel`
+- All 620 league presets ported
+- JSON save/load persistence compatible with the Go version
+- Full TUI rendering with 256-color styling, box-drawing borders, ghost piece preview, and hint arrows
+- Release binary: 1.1MB (vs Go's 5.1MB)
+
+### Project Reorganization
+- Separated Go and Rust codebases into `go/` and `rust/` subdirectories
+- Updated `.gitignore` for the new layout
+
 ### League Mode
 - New league mode (`g` key from free play) with 620 pre-generated puzzles sorted by increasing difficulty (1-179 optimal moves)
 - All puzzles unlocked from the start — no linear progression or locking

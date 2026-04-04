@@ -1,6 +1,9 @@
-# Build output
-puzzle
-bin/
+# Go build output
+go/puzzle
+go/bin/
+
+# Rust build output
+rust/target/
 
 # Editor/IDE
 .idea/
