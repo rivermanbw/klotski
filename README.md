@@ -1,6 +1,8 @@
 # Klotski Puzzle
 
-A terminal-based sliding block puzzle game written in Go using [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+A terminal-based sliding block puzzle game with two implementations:
+- **Go** — using [Bubble Tea](https://github.com/charmbracelet/bubbletea) (`go/`)
+- **Rust** — using [ratatui](https://github.com/ratatui/ratatui) + [crossterm](https://github.com/crossterm-rs/crossterm) (`rust/`)
 
 ## Game Overview
 
@@ -200,7 +202,10 @@ The large 2x2 block must reach the bottom-center:
 
 ## Building and Running
 
+### Go
+
 ```bash
+cd go
 go build -o puzzle .
 ./puzzle
 ```
@@ -208,15 +213,32 @@ go build -o puzzle .
 Or run directly:
 
 ```bash
+cd go
 go run .
+```
+
+### Rust
+
+```bash
+cd rust
+cargo build --release
+./target/release/puzzle
+```
+
+Or run directly:
+
+```bash
+cd rust
+cargo run --release
 ```
 
 ## Generating Presets
 
-The 620 league puzzles are pre-generated and committed as `presets.go`.
-To regenerate:
+The 620 league puzzles are pre-generated and committed as `presets.go` (Go) and `presets.rs` (Rust).
+To regenerate (Go):
 
 ```bash
+cd go
 GENERATE_PRESETS=1 go test -run TestGeneratePresets -timeout 30m -count=1
 ```
 
