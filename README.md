@@ -202,9 +202,9 @@ The large 2x2 block must reach the bottom-center:
 +---+---+---+---+
 ```
 
-## Sound (Go only)
+## Sound
 
-The Go version features programmatically generated audio:
+Both implementations feature programmatically generated audio:
 
 - **Theme music** — Korobeiniki (Tetris Theme A) plays in a loop as background
   music, with a chiptune square-wave melody and pulsing sine bass.

@@ -6,6 +6,7 @@ use crate::league::*;
 use crate::presets::presets;
 use crate::save::*;
 use crate::solver::*;
+use crate::sound::SoundEngine;
 
 /// Game modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +78,9 @@ pub struct App {
     // Background message channel.
     pub bg_rx: mpsc::Receiver<BgMsg>,
     pub bg_tx: mpsc::Sender<BgMsg>,
+
+    // Sound engine.
+    pub sound: SoundEngine,
 }
 
 impl App {
@@ -113,6 +117,7 @@ impl App {
             presets: presets(),
             bg_rx: rx,
             bg_tx: tx,
+            sound: SoundEngine::new(),
         };
         app.generate_board_bg(Difficulty::Easy);
         app
@@ -228,6 +233,12 @@ impl App {
         // Quit — always available.
         if key == "q" || key == "ctrl+c" {
             return true;
+        }
+
+        // Mute toggle — always available except during text input.
+        if key == "m" && self.mode != GameMode::NameInput {
+            self.sound.toggle_mute();
+            return false;
         }
 
         match self.mode {
@@ -435,6 +446,7 @@ impl App {
                         self.selected = -1;
                         self.hint = None;
                         self.hint_loading = false;
+                        self.sound.play_success();
                         // In league play, auto-save the score.
                         if self.mode == GameMode::LeaguePlay {
                             self.league_score = calc_score(self.optimal, self.board.moves);

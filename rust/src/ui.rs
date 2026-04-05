@@ -284,8 +284,13 @@ fn render_free_play(app: &App) -> Vec<Line<'static>> {
                 Style::default().fg(color256(46)),
             )));
         } else {
+            let mute_label = if app.sound.is_muted() {
+                "m: unmute"
+            } else {
+                "m: mute"
+            };
             lines.push(Line::from(Span::styled(
-                "  Arrows/hjkl: move  Enter/Space: select  n: new  e: editor  g: league  ?: cheat  1/2/3: difficulty  q: quit",
+                format!("  Arrows/hjkl: move  Enter/Space: select  n: new  e: editor  g: league  ?: cheat  1/2/3: difficulty  {}  q: quit", mute_label),
                 Style::default().fg(DIM),
             )));
         }
@@ -405,8 +410,13 @@ fn render_league_play(app: &App) -> Vec<Line<'static>> {
                 Style::default().fg(color256(46)),
             )));
         } else {
+            let mute_label = if app.sound.is_muted() {
+                "m: unmute"
+            } else {
+                "m: mute"
+            };
             lines.push(Line::from(Span::styled(
-                "  Arrows/hjkl: move  Enter/Space: select  c: coords  Esc: back to league  q: quit",
+                format!("  Arrows/hjkl: move  Enter/Space: select  c: coords  {}  Esc: back to league  q: quit", mute_label),
                 Style::default().fg(DIM),
             )));
         }

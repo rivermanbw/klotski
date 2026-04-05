@@ -4,6 +4,7 @@ mod league;
 mod presets;
 mod save;
 mod solver;
+mod sound;
 mod ui;
 
 use std::io;
@@ -27,6 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new();
+    app.sound.start_theme_loop();
 
     loop {
         // Poll background messages.
@@ -56,6 +58,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+
+    // Stop sound.
+    app.sound.stop();
 
     // Restore terminal.
     disable_raw_mode()?;
