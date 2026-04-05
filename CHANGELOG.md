@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Sound (Go only)
+- Background theme music: Korobeiniki (Tetris Theme A) with chiptune melody and pulsing bass, looping continuously
+- Victory chime: ascending C5-E5-G5-C6 success sound on puzzle completion
+- All audio generated programmatically at runtime — no embedded assets
+- `m` key to toggle mute/unmute (global, works in all modes except name input)
+- Help text dynamically shows `m: mute` or `m: unmute` based on current state
+- Audio playback via `gopxl/beep` with `ebitengine/oto` backend; fails silently if audio is unavailable
+- `go run ./cmd/gensound` tool to export sounds as WAV files for previewing or tweaking
+
 ### Rust Port
 - Full rewrite of the game in Rust using `ratatui` + `crossterm`
 - Feature parity with the Go version: all 6 game modes (FreePlay, Editor, NameInput, League, LeaguePlay, Leaderboard)

@@ -267,6 +267,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		// Mute toggle — always available except during text input.
+		if key == "m" && m.mode != modeNameInput {
+			toggleMute()
+			return m, nil
+		}
+
 		// Route by mode.
 		switch m.mode {
 		case modeEditor:
@@ -555,6 +561,7 @@ func (m model) updatePlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.selected = -1
 					m.hint = nil
 					m.hintLoading = false
+					playSuccessSound()
 					// In league play, auto-save the score.
 					if m.mode == modeLeaguePlay {
 						m.leagueScore = calcScore(m.optimal, m.board.Moves)
@@ -858,8 +865,12 @@ func (m model) viewFreePlay() string {
 			selStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("46"))
 			sb.WriteString(selStyle.Render("  Piece selected — arrows: move  enter: accept  esc: cancel"))
 		} else {
+			muteLabel := "m: mute"
+			if isMuted() {
+				muteLabel = "m: unmute"
+			}
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(
-				"  Arrows/hjkl: move  Enter/Space: select  n: new  e: editor  g: league  ?: cheat  1/2/3: difficulty  q: quit"))
+				"  Arrows/hjkl: move  Enter/Space: select  n: new  e: editor  g: league  ?: cheat  1/2/3: difficulty  " + muteLabel + "  q: quit"))
 		}
 		sb.WriteString("\n")
 	}
@@ -1073,8 +1084,12 @@ func (m model) viewLeaguePlay() string {
 			selStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("46"))
 			sb.WriteString(selStyle.Render("  Piece selected — arrows: move  enter: accept  esc: cancel"))
 		} else {
+			muteLabel := "m: mute"
+			if isMuted() {
+				muteLabel = "m: unmute"
+			}
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(
-				"  Arrows/hjkl: move  Enter/Space: select  c: coords  Esc: back to league  q: quit"))
+				"  Arrows/hjkl: move  Enter/Space: select  c: coords  " + muteLabel + "  Esc: back to league  q: quit"))
 		}
 		sb.WriteString("\n")
 	}
@@ -1708,6 +1723,8 @@ func (m model) viewEditor() string {
 }
 
 func main() {
+	playThemeMusic()
+	defer stopThemeMusic()
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

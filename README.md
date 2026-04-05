@@ -102,6 +102,7 @@ Create custom puzzles from scratch. Press `e` from free play to enter.
 | `g`            | Enter league mode                |
 | `c`            | Toggle coordinate labels         |
 | `?`            | Toggle cheat mode                |
+| `m`            | Toggle mute/unmute               |
 | `q` / Ctrl+C   | Quit                            |
 
 ### League Browser
@@ -127,6 +128,7 @@ Create custom puzzles from scratch. Press `e` from free play to enter.
 | `u`            | Undo last move                   |
 | `U`            | Restart puzzle                   |
 | `c`            | Toggle coordinate labels         |
+| `m`            | Toggle mute/unmute               |
 | `q` / Ctrl+C   | Quit                            |
 
 After winning: `Enter` advances to the next puzzle, `Esc` returns to the browser,
@@ -198,6 +200,29 @@ The large 2x2 block must reach the bottom-center:
 +---+---+---+---+
 |   | L | L |   |
 +---+---+---+---+
+```
+
+## Sound (Go only)
+
+The Go version features programmatically generated audio:
+
+- **Theme music** — Korobeiniki (Tetris Theme A) plays in a loop as background
+  music, with a chiptune square-wave melody and pulsing sine bass.
+- **Victory chime** — A short ascending arpeggio (C5-E5-G5-C6) plays on puzzle
+  completion.
+- **Mute** — Press `m` at any time to toggle sound on/off. The help bar updates
+  to show the current state (`m: mute` / `m: unmute`).
+
+All audio is synthesised at startup — no external sound files are shipped with
+the binary. If audio output is unavailable, the game runs silently with no
+errors.
+
+To export the sounds as standalone WAV files for previewing or editing:
+
+```bash
+cd go
+go run ./cmd/gensound
+# writes sounds/success.wav and sounds/theme.wav
 ```
 
 ## Building and Running
